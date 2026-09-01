@@ -9,12 +9,12 @@ import { Btn, Field, Input, toast } from "./ui";
 const LOG_LINES: Array<[string, string, string, string]> = [
   ["07:12", "fitness", "5K run · 42 min", "baseline ok"],
   ["08:03", "habits", "Read 20 pages", "completed"],
-  ["09:41", "money", "Groceries −$23.10", "within cap"],
+  ["09:41", "money", "Groceries −₹1,240", "within cap"],
   ["11:26", "study", "Algorithms · 1.75 h", "pace +12%"],
-  ["13:05", "money", "Campus lunch −$8.40", "within cap"],
+  ["13:05", "money", "Canteen lunch −₹280", "within cap"],
   ["16:44", "grades", "Quiz 3 · 17/20", "recorded"],
-  ["19:20", "savings", "Vault transfer +$60", "on pace"],
-  ["21:58", "goals", "Emergency fund → $830", "55% reached"],
+  ["19:20", "savings", "Vault transfer +₹3,000", "on pace"],
+  ["21:58", "goals", "Emergency fund → ₹83,000", "55% reached"],
   ["22:31", "habits", "Lights out 23:30", "pending"],
   ["23:02", "money", "Cap usage 81%", "monitor"],
 ];

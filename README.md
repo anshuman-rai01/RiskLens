@@ -49,7 +49,7 @@ create table users (
 create table profiles (
   user_id uuid primary key references users(id) on delete cascade,
   name text not null, age int check (age between 10 and 100),
-  role text not null, currency text not null default '$',
+  role text not null, currency text not null default '₹', -- fixed to INR application-wide (see src/lib/currency.ts)
   monthly_spending_cap numeric(12,2), monthly_savings_target numeric(12,2),
   weekly_study_hours numeric(6,2), weekly_fitness_minutes numeric(8,2),
   weekly_habit_completions int, updated_at timestamptz not null default now()

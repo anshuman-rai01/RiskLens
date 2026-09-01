@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import type { Route } from "./AppShell";
 import { CATEGORIES } from "../lib/categories";
+import { formatINR } from "../lib/currency";
 import { generateSampleEntries, getOverview, getProfile, type Overview } from "../lib/db";
 import { entrySummary } from "../lib/summary";
 import type { Category, Entry, GoalData, Profile } from "../lib/types";
@@ -22,7 +23,6 @@ interface BaselineRow {
 }
 
 function buildRows(p: Profile, o: Overview): BaselineRow[] {
-  const c = p.currency;
   const now = new Date();
   const dayOfMonth = now.getDate();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -39,7 +39,7 @@ function buildRows(p: Profile, o: Overview): BaselineRow[] {
       icon: "wallet",
       label: "Monthly spending cap",
       accent: CATEGORIES.income_expense.accent,
-      usedText: `${fmtMoney(o.monthSpent, c)} / ${fmtMoney(p.monthlySpendingCap, c)}`,
+      usedText: `${fmtMoney(o.monthSpent)} / ${fmtMoney(p.monthlySpendingCap)}`,
       pct,
       marker: elapsed * 100,
       tone: projPct > 100 ? "breach" : projPct > 90 ? "warn" : "ok",
@@ -59,7 +59,7 @@ function buildRows(p: Profile, o: Overview): BaselineRow[] {
       icon: "vault",
       label: "Monthly savings target",
       accent: CATEGORIES.savings.accent,
-      usedText: `${fmtMoney(o.monthSaved, c)} / ${fmtMoney(p.monthlySavingsTarget, c)}`,
+      usedText: `${fmtMoney(o.monthSaved)} / ${fmtMoney(p.monthlySavingsTarget)}`,
       pct,
       marker: elapsed * 100,
       tone: pct >= 100 ? "ok" : behind ? "warn" : "ok",
@@ -267,7 +267,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (r: Route) => void }) {
               <ul>
                 {o.recent.map((e: Entry, i) => {
                   const meta = CATEGORIES[e.category];
-                  const s = entrySummary(e, p.currency);
+                  const s = entrySummary(e);
                   return (
                     <li
                       key={e.id}
@@ -309,8 +309,8 @@ export function Dashboard({ onNavigate }: { onNavigate: (r: Route) => void }) {
             </div>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: "net flow", value: fmtMoney(net, p.currency), tone: net >= 0 ? "#7fc79b" : "#e8a196" },
-                { label: "saved", value: fmtMoney(o.monthSaved, p.currency), tone: "#e0a63c" },
+                { label: "net flow", value: fmtMoney(net), tone: net >= 0 ? "#7fc79b" : "#e8a196" },
+                { label: "saved", value: fmtMoney(o.monthSaved), tone: "#e0a63c" },
                 { label: "study · 7d", value: `${o.studyHours7} h`, tone: "#8fc3dd" },
                 { label: "records", value: String(o.totalEntries), tone: "#d8e9dd" },
               ].map((s) => (
@@ -361,7 +361,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (r: Route) => void }) {
                       <Bar pct={pct} accent={CATEGORIES.goals.accent} height={6} />
                       <div className="mt-1.5 flex items-center justify-between">
                         <span className="font-mono text-[10.5px] text-ink-faint">
-                          {d.current.toLocaleString()}/{d.target.toLocaleString()} {d.unit}
+                          {formatINR(d.current)}/{formatINR(d.target)} {d.unit}
                         </span>
                         {days != null && (
                           <Chip tone={days < 7 ? "breach" : days < 14 ? "warn" : "neutral"} className="!text-[10.5px]">

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, type FormEvent } from "react";
 import { ApiError, listMySessions } from "../lib/auth";
+import { CURRENCY_CODE, CURRENCY_NAME, CURRENCY_SYMBOL } from "../lib/currency";
 import { getProfile, updateProfile, type ProfilePatch } from "../lib/db";
 import { checkPassword } from "../lib/validation";
 import type { Profile, SessionRecord } from "../lib/types";
@@ -7,7 +8,6 @@ import { useAuth } from "../state/AuthContext";
 import { I } from "./icons";
 import { Btn, Chip, Field, Input, Select, fmtDate, toast, useDataVersion } from "./ui";
 
-const CURRENCIES = ["$", "€", "£", "₹", "¥", "₵", "R", "kr"];
 const ROLES: Array<{ value: Profile["role"]; label: string }> = [
   { value: "student", label: "Student" },
   { value: "professional", label: "Professional" },
@@ -52,7 +52,7 @@ export function ProfilePage() {
           name: p.name,
           age: p.age == null ? "" : String(p.age),
           role: p.role,
-          currency: p.currency,
+          currency: CURRENCY_SYMBOL,
           monthlySpendingCap: p.monthlySpendingCap == null ? "" : String(p.monthlySpendingCap),
           monthlySavingsTarget: p.monthlySavingsTarget == null ? "" : String(p.monthlySavingsTarget),
           weeklyStudyHours: p.weeklyStudyHours == null ? "" : String(p.weeklyStudyHours),
@@ -127,7 +127,7 @@ export function ProfilePage() {
         <div className="p-5 grid grid-cols-2 gap-3.5">
           <div className="col-span-2">
             <Field label="Full name">
-              <Input value={form.name} placeholder="Amara Osei" onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <Input value={form.name} placeholder="Aarav Sharma" onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </Field>
           </div>
           <Field label="Age">
@@ -140,12 +140,11 @@ export function ProfilePage() {
               ))}
             </Select>
           </Field>
-          <Field label="Currency" hint="display symbol">
-            <Select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
-              {CURRENCIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </Select>
+          <Field label="Currency" hint="fixed">
+            <div className="flex items-center gap-2 rounded-lg border border-line-strong bg-card px-3 py-2 text-[15px]">
+              <span className="font-semibold text-ink">{CURRENCY_SYMBOL}</span>
+              <span className="text-ink-soft">{CURRENCY_CODE} — {CURRENCY_NAME}</span>
+            </div>
           </Field>
           <div className="flex items-end pb-1.5">
             <p className="font-mono text-[11px] text-ink-faint leading-relaxed">
@@ -161,11 +160,11 @@ export function ProfilePage() {
           </p>
         </div>
         <div className="p-5 grid grid-cols-2 gap-3.5">
-          <Field label="Monthly spending cap" hint={profile.currency}>
-            <Input type="number" min={0} step="0.01" placeholder="900" value={form.monthlySpendingCap ?? ""} onChange={(e) => setForm({ ...form, monthlySpendingCap: num(e.target.value) })} />
+          <Field label="Monthly spending cap" hint={CURRENCY_SYMBOL}>
+            <Input type="number" min={0} step="0.01" placeholder="45000" value={form.monthlySpendingCap ?? ""} onChange={(e) => setForm({ ...form, monthlySpendingCap: num(e.target.value) })} />
           </Field>
-          <Field label="Monthly savings target" hint={profile.currency}>
-            <Input type="number" min={0} step="0.01" placeholder="250" value={form.monthlySavingsTarget ?? ""} onChange={(e) => setForm({ ...form, monthlySavingsTarget: num(e.target.value) })} />
+          <Field label="Monthly savings target" hint={CURRENCY_SYMBOL}>
+            <Input type="number" min={0} step="0.01" placeholder="12000" value={form.monthlySavingsTarget ?? ""} onChange={(e) => setForm({ ...form, monthlySavingsTarget: num(e.target.value) })} />
           </Field>
           <Field label="Weekly study hours" hint="h / week">
             <Input type="number" min={0} step="0.25" placeholder="14" value={form.weeklyStudyHours ?? ""} onChange={(e) => setForm({ ...form, weeklyStudyHours: num(e.target.value) })} />

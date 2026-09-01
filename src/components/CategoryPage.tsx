@@ -1,6 +1,7 @@
 import React, { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { CATEGORIES, fieldDefaults } from "../lib/categories";
-import { createEntry, deleteEntry, getProfile, listEntries, updateEntry, validateEntryPayload } from "../lib/db";
+import { formatCurrency, formatINR } from "../lib/currency";
+import { createEntry, deleteEntry, listEntries, updateEntry, validateEntryPayload } from "../lib/db";
 import { entrySummary } from "../lib/summary";
 import type {
   AcademicData,
@@ -10,7 +11,6 @@ import type {
   GoalData,
   HabitData,
   IncomeExpenseData,
-  Profile,
   SavingsData,
   StudyData,
 } from "../lib/types";
@@ -43,7 +43,7 @@ function headCells(cat: Category): string[] {
   }
 }
 
-function bodyCells(e: Entry, currency: string): ReactNode[] {
+function bodyCells(e: Entry): ReactNode[] {
   switch (e.category) {
     case "income_expense": {
       const d = e.data as IncomeExpenseData;
@@ -51,7 +51,7 @@ function bodyCells(e: Entry, currency: string): ReactNode[] {
         <Chip key="k" tone={d.kind === "income" ? "ok" : "neutral"}>{d.kind}</Chip>,
         <span key="l" className="font-medium text-ink">{d.label}</span>,
         <span key="a" className={`font-mono font-semibold tabular ${d.kind === "income" ? "text-ok" : "text-coral"}`}>
-          {d.kind === "expense" ? "−" : "+"}{currency}{d.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          {d.kind === "expense" ? "−" : "+"}{formatCurrency(d.amount)}
         </span>,
       ];
     }
@@ -59,7 +59,7 @@ function bodyCells(e: Entry, currency: string): ReactNode[] {
       const d = e.data as SavingsData;
       return [
         <span key="v" className="font-medium text-ink">{d.vault}</span>,
-        <span key="a" className="font-mono font-semibold tabular text-ok">+{currency}{d.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>,
+        <span key="a" className="font-mono font-semibold tabular text-ok">+{formatCurrency(d.amount)}</span>,
       ];
     }
     case "study": {
@@ -99,7 +99,7 @@ function bodyCells(e: Entry, currency: string): ReactNode[] {
       const pct = d.target > 0 ? Math.round((d.current / d.target) * 100) : 0;
       return [
         <span key="t" className="font-medium text-ink">{d.title}</span>,
-        <span key="p" className="font-mono tabular text-ink-soft">{d.current.toLocaleString()}/{d.target.toLocaleString()} {d.unit} · {pct}%</span>,
+        <span key="p" className="font-mono tabular text-ink-soft">{formatINR(d.current)}/{formatINR(d.target)} {d.unit} · {pct}%</span>,
         <span key="d" className="font-mono tabular text-ink-soft">{d.deadline ? fmtDate(d.deadline) : "open"}</span>,
       ];
     }
@@ -112,7 +112,6 @@ export function CategoryPage({ category }: { category: Category }) {
   const meta = CATEGORIES[category];
   const version = useDataVersion();
   const [entries, setEntries] = useState<Entry[] | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [values, setValues] = useState<Values>(() => fieldDefaults(meta));
   const [occurredOn, setOccurredOn] = useState(todayISO());
   const [note, setNote] = useState("");
@@ -125,12 +124,9 @@ export function CategoryPage({ category }: { category: Category }) {
 
   useEffect(() => {
     let on = true;
-    Promise.all([listEntries(category), getProfile()])
-      .then(([rows, prof]) => {
-        if (on) {
-          setEntries(rows);
-          setProfile(prof);
-        }
+    listEntries(category)
+      .then((rows) => {
+        if (on) setEntries(rows);
       })
       .catch(() => {});
     return () => {
@@ -219,7 +215,6 @@ export function CategoryPage({ category }: { category: Category }) {
     return e.occurredOn >= cutoff;
   });
 
-  const currency = profile?.currency ?? "$";
   const heads = headCells(category);
 
   return (
@@ -235,7 +230,7 @@ export function CategoryPage({ category }: { category: Category }) {
               {editing ? "Editing entry" : meta.verb}
             </h3>
             <p className="text-[11.5px] text-ink-faint truncate">
-              {editing ? entrySummary(editing, currency).text : meta.tagline}
+              {editing ? entrySummary(editing).text : meta.tagline}
             </p>
           </div>
           {editing && (
@@ -364,7 +359,7 @@ export function CategoryPage({ category }: { category: Category }) {
                     onClick={() => setDetail(e)}
                   >
                     <td className="px-5 py-2.5 font-mono text-[12px] text-ink-soft tabular whitespace-nowrap">{fmtDate(e.occurredOn)}</td>
-                    {bodyCells(e, currency).map((cell, ci) => (
+                    {bodyCells(e).map((cell, ci) => (
                       <td key={ci} className="px-3 py-2.5 whitespace-nowrap max-w-[220px] truncate">{cell}</td>
                     ))}
                     <td className="px-3 py-2.5 whitespace-nowrap text-right">
@@ -422,8 +417,8 @@ export function CategoryPage({ category }: { category: Category }) {
               <div>
                 <p className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-ink-faint mb-2">Current · v{detail.revisions.length + 1}</p>
                 <div className="rounded-lg border border-line bg-card px-4 py-3.5">
-                  <p className="text-[15px] font-semibold text-ink">{entrySummary(detail, currency).text}</p>
-                  <p className="mt-1 font-mono text-[12.5px] text-ink-soft tabular">{entrySummary(detail, currency).amount ?? ""}</p>
+                  <p className="text-[15px] font-semibold text-ink">{entrySummary(detail).text}</p>
+                  <p className="mt-1 font-mono text-[12.5px] text-ink-soft tabular">{entrySummary(detail).amount ?? ""}</p>
                   <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-ink-faint">
                     <span>date · {fmtDate(detail.occurredOn)}</span>
                     <span>created · {fmtDate(detail.createdAt)} {fmtTime(detail.createdAt)}</span>
@@ -447,10 +442,10 @@ export function CategoryPage({ category }: { category: Category }) {
                         <li key={i} className="ml-4">
                           <span className="absolute -left-[5px] mt-1.5 w-2 h-2 rounded-full bg-moss" />
                           <p className="text-[13px] font-medium text-ink">
-                            v{detail.revisions.length - i} · {entrySummary(revEntry, currency).text}
+                            v{detail.revisions.length - i} · {entrySummary(revEntry).text}
                           </p>
                           <p className="font-mono text-[11px] text-ink-soft tabular">
-                            {entrySummary(revEntry, currency).amount ?? ""} · archived {fmtDate(r.archivedAt)} {fmtTime(r.archivedAt)}
+                            {entrySummary(revEntry).amount ?? ""} · archived {fmtDate(r.archivedAt)} {fmtTime(r.archivedAt)}
                           </p>
                         </li>
                       );
@@ -478,7 +473,7 @@ export function CategoryPage({ category }: { category: Category }) {
         {deleting && (
           <>
             <p className="text-[14px] text-ink-soft leading-relaxed">
-              <span className="font-semibold text-ink">{entrySummary(deleting, currency).text}</span>
+              <span className="font-semibold text-ink">{entrySummary(deleting).text}</span>
               {" "}from {fmtDate(deleting.occurredOn)} will be permanently removed
               {deleting.revisions.length > 0 && (
                 <> along with its <span className="font-semibold text-coral">{deleting.revisions.length} archived revision(s)</span></>

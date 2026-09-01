@@ -7,6 +7,7 @@
 
 import { ApiError, requireUserId } from "./auth";
 import { CATEGORIES } from "./categories";
+import { CURRENCY_SYMBOL } from "./currency";
 import { buildSampleEntries } from "./seed";
 import { readTable, uid, writeTable } from "./store";
 import { isNonNegativeNum, isValidDate, notFarFuture } from "./validation";
@@ -206,8 +207,8 @@ export async function updateProfile(patch: ProfilePatch): Promise<Profile> {
     age = Number(patch.age);
     if (!Number.isInteger(age) || age < 10 || age > 100) throw new ApiError("VALIDATION", "Age must be between 10 and 100.", "age");
   }
-  const currency = patch.currency.trim() || "$";
-  if (currency.length > 4) throw new ApiError("VALIDATION", "Currency must be a short symbol.", "currency");
+  // Application currency is fixed to INR (₹) — client-supplied symbols are ignored.
+  const currency = CURRENCY_SYMBOL;
   const roles: UserRole[] = ["student", "professional", "freelancer", "other"];
   if (!roles.includes(patch.role)) throw new ApiError("VALIDATION", "Pick a valid role.", "role");
 
@@ -216,7 +217,7 @@ export async function updateProfile(patch: ProfilePatch): Promise<Profile> {
     name,
     age,
     role: patch.role,
-    currency: currency.slice(0, 4),
+    currency,
     monthlySpendingCap: parseLimit(patch.monthlySpendingCap, "Spending cap"),
     monthlySavingsTarget: parseLimit(patch.monthlySavingsTarget, "Savings target"),
     weeklyStudyHours: parseLimit(patch.weeklyStudyHours, "Study target"),

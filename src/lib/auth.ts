@@ -8,6 +8,7 @@
  * Refresh-token reuse (theft indicator) revokes every session for the user.
  */
 
+import { CURRENCY_SYMBOL } from "./currency";
 import { hashPassword, initSigning, signToken, verifyPassword, verifyToken } from "./crypto";
 import { buildDemoRows, DEMO_EMAIL } from "./seed";
 import { readTable, readValue, removeValue, uid, writeTable, writeValue } from "./store";
@@ -67,7 +68,7 @@ function defaultProfile(userId: string): Profile {
     name: "",
     age: null,
     role: "student",
-    currency: "$",
+    currency: CURRENCY_SYMBOL,
     monthlySpendingCap: null,
     monthlySavingsTarget: null,
     weeklyStudyHours: null,

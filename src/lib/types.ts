@@ -108,7 +108,7 @@ export interface Profile {
   name: string;
   age: number | null;
   role: UserRole;
-  currency: string;
+  currency: string; // display symbol — fixed to ₹ (INR) application-wide; see lib/currency.ts
   monthlySpendingCap: number | null;
   monthlySavingsTarget: number | null;
   weeklyStudyHours: number | null;

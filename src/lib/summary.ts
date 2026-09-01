@@ -1,5 +1,6 @@
 /** One-line rendering of any entry, regardless of category — used by feeds and tables. */
 
+import { formatCurrency, formatINR } from "./currency";
 import type {
   AcademicData,
   Entry,
@@ -17,13 +18,13 @@ export interface Summary {
   tone: "pos" | "neg" | null;
 }
 
-export function entrySummary(e: Entry, currency: string): Summary {
+export function entrySummary(e: Entry): Summary {
   switch (e.category) {
     case "income_expense": {
       const d = e.data as IncomeExpenseData;
       return {
         text: d.label || (d.kind === "income" ? "Income" : "Expense"),
-        amount: `${d.kind === "expense" ? "−" : "+"}${currency}${d.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+        amount: `${d.kind === "expense" ? "−" : "+"}${formatCurrency(d.amount)}`,
         tone: d.kind === "expense" ? "neg" : "pos",
       };
     }
@@ -31,7 +32,7 @@ export function entrySummary(e: Entry, currency: string): Summary {
       const d = e.data as SavingsData;
       return {
         text: d.vault || "Savings",
-        amount: `+${currency}${d.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+        amount: `+${formatCurrency(d.amount)}`,
         tone: "pos",
       };
     }
@@ -56,7 +57,7 @@ export function entrySummary(e: Entry, currency: string): Summary {
       const d = e.data as GoalData;
       return {
         text: d.title,
-        amount: `${d.current.toLocaleString()}/${d.target.toLocaleString()} ${d.unit}`,
+        amount: `${formatINR(d.current)}/${formatINR(d.target)} ${d.unit}`,
         tone: d.target > 0 && d.current / d.target >= 0.5 ? "pos" : null,
       };
     }

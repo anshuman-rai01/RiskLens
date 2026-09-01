@@ -37,16 +37,16 @@ function ts(offsetDays: number, hour: number, min: number): string {
 const SUBJECTS = ["Algorithms", "Statistics", "Database Systems", "Microeconomics"];
 const TOPICS = ["lecture notes", "problem set", "past paper", "group review", "flashcards", "lab work"];
 const EXPENSES: Array<[string, number, number]> = [
-  ["Groceries", 9, 34],
-  ["Campus lunch", 5, 12],
-  ["Transit top-up", 6, 15],
-  ["Coffee", 3, 7],
-  ["Data bundle", 8, 18],
-  ["Cinema night", 10, 16],
-  ["Textbook chapter", 9, 22],
-  ["Gym smoothie", 5, 9],
-  ["Laundry", 6, 10],
-  ["Cloud storage", 3, 6],
+  ["Groceries", 700, 2300],
+  ["Canteen lunch", 180, 420],
+  ["Metro card top-up", 300, 800],
+  ["Chai & coffee", 80, 240],
+  ["Data recharge", 400, 1000],
+  ["Cinema night", 600, 1400],
+  ["Textbook chapter", 450, 1500],
+  ["Gym smoothie", 200, 450],
+  ["Laundry", 300, 650],
+  ["Cloud storage", 200, 500],
 ];
 const FITNESS: Array<[string, "low" | "moderate" | "high"]> = [
   ["5K run", "moderate"],
@@ -73,12 +73,12 @@ export async function buildDemoRows(): Promise<{ user: StoredUser; profile: Prof
 
   const profile: Profile = {
     userId,
-    name: "Amara Osei",
+    name: "Aarav Sharma",
     age: 22,
     role: "student",
-    currency: "$",
-    monthlySpendingCap: 900,
-    monthlySavingsTarget: 250,
+    currency: "₹",
+    monthlySpendingCap: 45_000,
+    monthlySavingsTarget: 12_000,
     weeklyStudyHours: 14,
     weeklyFitnessMinutes: 150,
     weeklyHabitCompletions: 12,
@@ -118,13 +118,13 @@ export function buildSampleEntries(userId: string): Entry[] {
       const amount = Math.round((lo + rnd() * (hi - lo)) * 100) / 100;
       push("income_expense", { kind: "expense", amount, label }, i, 12 + k * 3, "");
     }
-    if (i % 14 === 3) push("income_expense", { kind: "income", amount: 2400, label: "Part-time shift payout" }, i, 9);
+    if (i % 14 === 3) push("income_expense", { kind: "income", amount: 18_000, label: "Part-time shift payout" }, i, 9);
     if (rnd() < 0.06)
-      push("income_expense", { kind: "income", amount: Math.round(90 + rnd() * 70), label: "Tutoring session" }, i, 17);
+      push("income_expense", { kind: "income", amount: Math.round(800 + rnd() * 700), label: "Tutoring session" }, i, 17);
 
     // ---- savings ----
     if (i % 7 === 1)
-      push("savings", { amount: Math.round(45 + rnd() * 35), vault: "Emergency vault" }, i, 8, "Auto-transfer");
+      push("savings", { amount: Math.round(2_200 + rnd() * 1_600), vault: "Emergency vault" }, i, 8, "Auto-transfer");
 
     // ---- study ----
     if (rnd() < 0.82) {
@@ -172,20 +172,20 @@ export function buildSampleEntries(userId: string): Entry[] {
     id: uid("ent"),
     userId,
     category: "goals",
-    data: { title: "Emergency fund", unit: "$", target: 1500, current: 830, deadline: dayISO(-88) },
+    data: { title: "Emergency fund", unit: "₹", target: 150_000, current: 83_000, deadline: dayISO(-88) },
     occurredOn: dayISO(50),
     note: "3-month runway target",
     createdAt: ts(50, 10, 0),
     updatedAt: ts(2, 19, 30),
     revisions: [
       {
-        data: { title: "Emergency fund", unit: "$", target: 1500, current: 410, deadline: dayISO(-88) },
+        data: { title: "Emergency fund", unit: "₹", target: 150_000, current: 41_000, deadline: dayISO(-88) },
         occurredOn: dayISO(50),
         note: "",
         archivedAt: ts(30, 20, 0),
       },
       {
-        data: { title: "Emergency fund", unit: "$", target: 1500, current: 640, deadline: dayISO(-88) },
+        data: { title: "Emergency fund", unit: "₹", target: 150_000, current: 64_000, deadline: dayISO(-88) },
         occurredOn: dayISO(50),
         note: "",
         archivedAt: ts(14, 20, 15),

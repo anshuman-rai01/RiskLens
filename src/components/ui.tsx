@@ -6,6 +6,7 @@ import {
   type ReactNode,
   type SelectHTMLAttributes,
 } from "react";
+import { formatCurrency } from "../lib/currency";
 import { getDataVersion, subscribeData } from "../lib/store";
 import { I } from "./icons";
 
@@ -320,9 +321,9 @@ export function Modal({
 
 /* ---------------- misc ---------------- */
 
-export function fmtMoney(n: number, currency: string): string {
-  const sign = n < 0 ? "−" : "";
-  return `${sign}${currency}${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+/** Monetary display — delegates to the centralized INR formatter (lib/currency.ts). */
+export function fmtMoney(n: number): string {
+  return formatCurrency(n);
 }
 
 export function fmtDate(iso: string): string {

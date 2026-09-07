@@ -17,8 +17,8 @@ const ROLES: Array<{ value: Profile["role"]; label: string }> = [
 
 function SectionHead({ icon, title, sub }: { icon: string; title: string; sub: string }) {
   return (
-    <div className="flex items-center gap-3 px-5 py-4 border-b border-line bg-card/60">
-      <span className="w-9 h-9 rounded-lg bg-moss/12 text-moss flex items-center justify-center">
+    <div className="flex items-center gap-3 px-5 py-4 border-b border-line bg-bg-soft">
+      <span className="w-9 h-9 rounded-lg bg-primary-soft text-primary flex items-center justify-center">
         <I name={icon} size={17} />
       </span>
       <div>
@@ -122,8 +122,8 @@ export function ProfilePage() {
   return (
     <div className="grid lg:grid-cols-2 gap-5 items-start">
       {/* -------- identity & baselines -------- */}
-      <form onSubmit={saveProfile} className="anim-rise rounded-xl border border-line bg-panel shadow-lift overflow-hidden" noValidate>
-        <SectionHead icon="user" title="Identity" sub="who the console belongs to" />
+      <form onSubmit={saveProfile} className="anim-rise rounded-xl border border-line bg-card shadow-sm overflow-hidden" noValidate>
+        <SectionHead icon="user" title="Profile" sub="Your identity and preferences" />
         <div className="p-5 grid grid-cols-2 gap-3.5">
           <div className="col-span-2">
             <Field label="Full name">
@@ -153,10 +153,10 @@ export function ProfilePage() {
           </div>
         </div>
 
-        <div className="px-5 py-3 border-y border-line bg-card/60">
-          <h4 className="font-display font-semibold text-[14px] text-ink">Compliance baselines</h4>
+        <div className="px-5 py-3 border-y border-line bg-bg-soft">
+          <h4 className="font-display font-semibold text-[14px] text-ink">Personal goals & baselines</h4>
           <p className="text-[12px] text-ink-faint mt-0.5">
-            The limits <span className="font-semibold text-ink-soft">you</span> answer to. Leave blank to disable a baseline — the board adapts.
+            Set targets for your habits, focus, and wellness. Leave blank to disable.
           </p>
         </div>
         <div className="p-5 grid grid-cols-2 gap-3.5">
@@ -186,8 +186,8 @@ export function ProfilePage() {
 
       <div className="space-y-5">
         {/* -------- security -------- */}
-        <form onSubmit={doChangePw} className="anim-rise stagger rounded-xl border border-line bg-panel shadow-lift overflow-hidden" style={{ "--i": 1 } as React.CSSProperties} noValidate>
-          <SectionHead icon="key" title="Security" sub="rotate your password — other sessions are revoked" />
+        <form onSubmit={doChangePw} className="anim-rise stagger rounded-xl border border-line bg-card shadow-sm overflow-hidden" style={{ "--i": 1 } as React.CSSProperties} noValidate>
+          <SectionHead icon="key" title="Security" sub="Update your password — other sessions will be revoked" />
           <div className="p-5 space-y-4">
             <Field label="Current password" error={pwErr.cur}>
               <Input type="password" autoComplete="current-password" value={curPw} invalid={!!pwErr.cur} onChange={(e) => setCurPw(e.target.value)} />
@@ -205,10 +205,10 @@ export function ProfilePage() {
                       background:
                         pwCheck.score >= seg
                           ? pwCheck.score <= 1
-                            ? "var(--color-coral)"
+                            ? "var(--color-danger)"
                             : pwCheck.score === 2
-                              ? "var(--color-amber-bright)"
-                              : "var(--color-moss-bright)"
+                              ? "var(--color-warn)"
+                              : "var(--color-ok)"
                           : "var(--color-line)",
                     }}
                   />
@@ -223,13 +223,13 @@ export function ProfilePage() {
         </form>
 
         {/* -------- sessions -------- */}
-        <section className="anim-rise stagger rounded-xl border border-line bg-panel shadow-lift overflow-hidden" style={{ "--i": 2 } as React.CSSProperties}>
-          <SectionHead icon="shield" title="Active sessions" sub="access 30 min · refresh 7 days, rotated on use" />
+        <section className="anim-rise stagger rounded-xl border border-line bg-card shadow-sm overflow-hidden" style={{ "--i": 2 } as React.CSSProperties}>
+          <SectionHead icon="shield" title="Active sessions" sub="Access tokens rotate automatically for security" />
           <ul>
             {sessions.length === 0 && <li className="px-5 py-5 text-[13px] text-ink-faint">No active sessions.</li>}
             {sessions.map((s, i) => (
               <li key={s.jti} className="reveal-row stagger flex items-center gap-3 px-5 py-3 border-b border-line last:border-b-0" style={{ "--i": i } as React.CSSProperties}>
-                <span className={`w-2 h-2 rounded-full shrink-0 ${i === 0 ? "bg-moss-bright" : "bg-line-strong"}`} />
+                <span className={`w-2 h-2 rounded-full shrink-0 ${i === 0 ? "bg-ok" : "bg-line-strong"}`} />
                 <div className="flex-1 min-w-0">
                   <p className="text-[13px] font-medium text-ink truncate">
                     {i === 0 ? "This device" : s.userAgent.split(")")[0].replace("(", " · ") || "Other device"}

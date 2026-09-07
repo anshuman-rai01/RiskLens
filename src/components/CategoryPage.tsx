@@ -50,7 +50,7 @@ function bodyCells(e: Entry): ReactNode[] {
       return [
         <Chip key="k" tone={d.kind === "income" ? "ok" : "neutral"}>{d.kind}</Chip>,
         <span key="l" className="font-medium text-ink">{d.label}</span>,
-        <span key="a" className={`font-mono font-semibold tabular ${d.kind === "income" ? "text-ok" : "text-coral"}`}>
+        <span key="a" className={`font-mono font-semibold tabular ${d.kind === "income" ? "text-ok" : "text-danger"}`}>
           {d.kind === "expense" ? "−" : "+"}{formatCurrency(d.amount)}
         </span>,
       ];
@@ -76,14 +76,14 @@ function bodyCells(e: Entry): ReactNode[] {
       return [
         <span key="c" className="font-medium text-ink">{d.course}</span>,
         <span key="a" className="text-ink-soft">{d.assessment}</span>,
-        <span key="s" className={`font-mono font-semibold tabular ${pct >= 50 ? "text-ink" : "text-coral"}`}>{d.score}/{d.maxScore} · {pct}%</span>,
+        <span key="s" className={`font-mono font-semibold tabular ${pct >= 50 ? "text-ink" : "text-danger"}`}>{d.score}/{d.maxScore} · {pct}%</span>,
       ];
     }
     case "fitness": {
       const d = e.data as FitnessData;
       return [
         <span key="a" className="font-medium text-ink">{d.activity}</span>,
-        <Chip key="i" tone={d.intensity === "high" ? "breach" : d.intensity === "moderate" ? "warn" : "ok"}>{d.intensity}</Chip>,
+        <Chip key="i" tone={d.intensity === "high" ? "danger" : d.intensity === "moderate" ? "warn" : "ok"}>{d.intensity}</Chip>,
         <span key="m" className="font-mono tabular text-ink">{d.minutes} min</span>,
       ];
     }
@@ -91,7 +91,7 @@ function bodyCells(e: Entry): ReactNode[] {
       const d = e.data as HabitData;
       return [
         <span key="h" className="font-medium text-ink">{d.habit}</span>,
-        <Chip key="s" tone={d.completed ? "ok" : "breach"}>{d.completed ? "done" : "missed"}</Chip>,
+        <Chip key="s" tone={d.completed ? "ok" : "danger"}>{d.completed ? "done" : "missed"}</Chip>,
       ];
     }
     case "goals": {
@@ -220,7 +220,7 @@ export function CategoryPage({ category }: { category: Category }) {
   return (
     <div className="grid xl:grid-cols-[380px_1fr] gap-5 items-start">
       {/* ---------------- form ---------------- */}
-      <section className="anim-rise rounded-xl border border-line bg-panel shadow-lift overflow-hidden xl:sticky xl:top-[78px]">
+      <section className="anim-rise rounded-xl border border-line bg-card shadow-sm overflow-hidden xl:sticky xl:top-[78px]">
         <div className="flex items-center gap-3 px-5 py-4 border-b border-line" style={{ background: `${meta.accent}0d` }}>
           <span className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: `${meta.accent}1c`, color: meta.accent }}>
             <I name={meta.icon} size={18} />
@@ -242,7 +242,7 @@ export function CategoryPage({ category }: { category: Category }) {
                 setNote("");
                 setErrors({});
               }}
-              className="text-[12px] font-semibold text-ink-soft hover:text-coral transition-colors"
+              className="text-[12px] font-semibold text-ink-soft hover:text-danger transition-colors"
             >
               cancel
             </button>
@@ -262,7 +262,7 @@ export function CategoryPage({ category }: { category: Category }) {
                         options={f.options ?? []}
                         value={String(values[f.key] ?? f.defaultValue ?? "")}
                         onChange={(v) => set(f.key, v)}
-                        accent={meta.accent}
+
                       />
                     </Field>
                   </div>
@@ -303,8 +303,8 @@ export function CategoryPage({ category }: { category: Category }) {
       </section>
 
       {/* ---------------- history ---------------- */}
-      <section className="anim-rise stagger rounded-xl border border-line bg-panel shadow-lift overflow-hidden min-w-0" style={{ "--i": 1 } as React.CSSProperties}>
-        <div className="flex flex-wrap items-center gap-2.5 px-5 py-3.5 border-b border-line bg-card/60">
+      <section className="anim-rise stagger rounded-xl border border-line bg-card shadow-sm overflow-hidden min-w-0" style={{ "--i": 1 } as React.CSSProperties}>
+        <div className="flex flex-wrap items-center gap-2.5 px-5 py-3.5 border-b border-line bg-bg-soft">
           <h3 className="font-display font-semibold text-[15.5px] text-ink mr-auto">
             History
             <span className="ml-2 font-mono text-[11.5px] font-normal text-ink-faint tabular">{filtered.length} records</span>
@@ -314,7 +314,7 @@ export function CategoryPage({ category }: { category: Category }) {
               key={k}
               onClick={() => setFilter(k)}
               className={`px-2.5 py-1 rounded-md text-[12px] font-semibold transition-colors focus-ring ${
-                filter === k ? "bg-pine text-mint" : "text-ink-soft hover:text-ink hover:bg-pine/8"
+                filter === k ? "bg-primary text-white" : "text-ink-soft hover:text-ink hover:bg-primary-soft"
               }`}
             >
               {label}
@@ -371,14 +371,14 @@ export function CategoryPage({ category }: { category: Category }) {
                         )}
                         <button
                           onClick={(ev) => { ev.stopPropagation(); startEdit(e); }}
-                          className="p-1.5 rounded-md text-ink-faint hover:text-moss hover:bg-moss/10 transition-colors focus-ring"
+                          className="p-1.5 rounded-md text-ink-faint hover:text-primary hover:bg-primary-soft transition-colors focus-ring"
                           title="Edit (archives current version)"
                         >
                           <I name="pencil" size={14} />
                         </button>
                         <button
                           onClick={(ev) => { ev.stopPropagation(); setDeleting(e); }}
-                          className="p-1.5 rounded-md text-ink-faint hover:text-coral hover:bg-coral/10 transition-colors focus-ring"
+                          className="p-1.5 rounded-md text-ink-faint hover:text-danger hover:bg-danger-soft transition-colors focus-ring"
                           title="Delete"
                         >
                           <I name="trash" size={14} />
@@ -402,14 +402,14 @@ export function CategoryPage({ category }: { category: Category }) {
       {/* ---------------- detail / revisions drawer ---------------- */}
       {detail && (
         <div className="fixed inset-0 z-[60]">
-          <button aria-label="Close details" className="absolute inset-0 bg-pine-ink/40 backdrop-blur-[1px]" onClick={() => setDetail(null)} />
-          <aside className="anim-slide-left absolute inset-y-0 right-0 w-full max-w-[400px] bg-panel border-l border-line shadow-pop flex flex-col">
+          <button aria-label="Close details" className="absolute inset-0 bg-ink/40 backdrop-blur-[1px]" onClick={() => setDetail(null)} />
+          <aside className="anim-slide-left absolute inset-y-0 right-0 w-full max-w-[400px] bg-card border-l border-line shadow-lg flex flex-col">
             <div className="flex items-center justify-between px-5 py-4 border-b border-line" style={{ background: `${meta.accent}0d` }}>
               <div className="flex items-center gap-2.5">
                 <span style={{ color: meta.accent }}><I name={meta.icon} size={18} /></span>
                 <h3 className="font-display font-semibold text-[15.5px] text-ink">Entry detail</h3>
               </div>
-              <button onClick={() => setDetail(null)} className="p-1.5 rounded-md text-ink-faint hover:text-ink hover:bg-pine/8 transition-colors focus-ring">
+              <button onClick={() => setDetail(null)} className="p-1.5 rounded-md text-ink-faint hover:text-ink hover:bg-bg-soft transition-colors focus-ring">
                 <I name="x" size={16} />
               </button>
             </div>
@@ -440,7 +440,7 @@ export function CategoryPage({ category }: { category: Category }) {
                       const revEntry = { ...detail, data: r.data } as Entry;
                       return (
                         <li key={i} className="ml-4">
-                          <span className="absolute -left-[5px] mt-1.5 w-2 h-2 rounded-full bg-moss" />
+                          <span className="absolute -left-[5px] mt-1.5 w-2 h-2 rounded-full bg-primary" />
                           <p className="text-[13px] font-medium text-ink">
                             v{detail.revisions.length - i} · {entrySummary(revEntry).text}
                           </p>
@@ -476,7 +476,7 @@ export function CategoryPage({ category }: { category: Category }) {
               <span className="font-semibold text-ink">{entrySummary(deleting).text}</span>
               {" "}from {fmtDate(deleting.occurredOn)} will be permanently removed
               {deleting.revisions.length > 0 && (
-                <> along with its <span className="font-semibold text-coral">{deleting.revisions.length} archived revision(s)</span></>
+                <> along with its <span className="font-semibold text-danger">{deleting.revisions.length} archived revision(s)</span></>
               )}
               . This can't be undone.
             </p>

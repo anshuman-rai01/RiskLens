@@ -5,33 +5,66 @@
   --font-body: "Instrument Sans", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SFMono-Regular", monospace;
 
-  --color-mist: #eef1ec;
-  --color-panel: #fbfcf9;
-  --color-card: #f5f7f2;
-  --color-ink: #14241d;
-  --color-ink-soft: #52665b;
-  --color-ink-faint: #7d8f84;
-  --color-line: #d8e0d4;
-  --color-line-strong: #c3cebf;
+  /* surfaces */
+  --color-mist: #f7f8fc;
+  --color-panel: #ffffff;
+  --color-card: #f6f7fb;
+  --color-ink: #1f2937;
+  --color-ink-soft: #6b7280;
+  --color-ink-faint: #9aa1af;
+  --color-line: #e5e7eb;
+  --color-line-strong: #d9dde5;
 
-  --color-pine: #123830;
-  --color-pine-deep: #0b2620;
-  --color-pine-ink: #081b16;
-  --color-moss: #1e5c4f;
-  --color-moss-bright: #2f7d5c;
-  --color-mint: #d8e9dd;
+  /* brand — purple/indigo identity */
+  --color-pine: #4f46e5;
+  --color-pine-deep: #4338ca;
+  --color-pine-ink: #312e81;
+  --color-moss: #4f46e5;
+  --color-moss-bright: #6366f1;
+  --color-mint: #ffffff;
+  --color-indigo: #4f46e5;
+  --color-violet: #5b4cc4;
+  --color-indigo-soft: #eef0fe;
+  --color-violet-soft: #efeafb;
 
-  --color-amber: #b57414;
-  --color-amber-bright: #e0a63c;
-  --color-coral: #c2473a;
-  --color-coral-soft: #f3ddd8;
-  --color-ok: #2e7d53;
-  --color-ok-soft: #ddeee2;
-  --color-warn-soft: #f5e8cd;
-  --color-breach-soft: #f2d9d4;
+  /* semantic */
+  --color-amber: #d97706;
+  --color-amber-bright: #f59e0b;
+  --color-coral: #ef4444;
+  --color-coral-soft: #fdecec;
+  --color-ok: #2e9b57;
+  --color-ok-soft: #e7f6ec;
+  --color-warn-soft: #fef3e2;
+  --color-breach-soft: #fdecec;
 
-  --shadow-lift: 0 1px 2px rgba(18, 56, 48, 0.06), 0 8px 24px -12px rgba(18, 56, 48, 0.25);
-  --shadow-pop: 0 2px 6px rgba(18, 56, 48, 0.1), 0 24px 48px -16px rgba(18, 56, 48, 0.35);
+  --shadow-lift: 0 1px 2px rgba(31, 41, 55, 0.05), 0 6px 20px -8px rgba(79, 70, 229, 0.12);
+  --shadow-pop: 0 2px 6px rgba(31, 41, 55, 0.08), 0 18px 40px -12px rgba(79, 70, 229, 0.25);
+}
+
+/* dark theme overrides — flipped on <html class="dark"> by the header toggle */
+.dark {
+  --color-mist: #0b0e1a;
+  --color-panel: #141828;
+  --color-card: #1a1f33;
+  --color-ink: #e9ebf4;
+  --color-ink-soft: #a6adc6;
+  --color-ink-faint: #737b98;
+  --color-line: #262c44;
+  --color-line-strong: #333a58;
+  --color-pine: #6366f1;
+  --color-pine-deep: #5457e9;
+  --color-pine-ink: #3436a4;
+  --color-moss: #818cf8;
+  --color-moss-bright: #8b93ff;
+  --color-mint: #f2f3ff;
+  --color-indigo-soft: rgba(99, 102, 241, 0.16);
+  --color-violet-soft: rgba(124, 111, 217, 0.16);
+  --color-ok-soft: rgba(46, 155, 87, 0.16);
+  --color-warn-soft: rgba(245, 158, 11, 0.15);
+  --color-coral-soft: rgba(239, 68, 68, 0.15);
+  --color-breach-soft: rgba(239, 68, 68, 0.15);
+  --shadow-lift: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px -8px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 2px 6px rgba(0, 0, 0, 0.35), 0 18px 40px -12px rgba(0, 0, 0, 0.6);
 }
 
 html { scroll-behavior: smooth; }
@@ -41,37 +74,39 @@ body {
   background: var(--color-mist);
   color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-::selection { background: rgba(30, 92, 79, 0.22); }
+::selection { background: rgba(79, 70, 229, 0.2); }
 
 /* ---------- scrollbars ---------- */
-* { scrollbar-width: thin; scrollbar-color: #b9c6b6 transparent; }
+* { scrollbar-width: thin; scrollbar-color: #c3c9d6 transparent; }
+.dark * { scrollbar-color: #3a415e transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: #b9c6b6; border-radius: 8px; }
+*::-webkit-scrollbar-thumb { background: #c3c9d6; border-radius: 8px; }
 *::-webkit-scrollbar-track { background: transparent; }
 
 /* ---------- ambient layers ---------- */
 .bg-blueprint {
   background-image:
-    radial-gradient(ellipse 90% 60% at 85% -10%, rgba(30, 92, 79, 0.1), transparent 60%),
-    radial-gradient(ellipse 70% 50% at -10% 100%, rgba(181, 116, 20, 0.07), transparent 55%),
-    linear-gradient(rgba(18, 56, 48, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(18, 56, 48, 0.045) 1px, transparent 1px);
+    radial-gradient(ellipse 90% 60% at 85% -10%, rgba(79, 70, 229, 0.09), transparent 60%),
+    radial-gradient(ellipse 70% 50% at -10% 100%, rgba(91, 76, 196, 0.07), transparent 55%),
+    linear-gradient(rgba(79, 70, 229, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(79, 70, 229, 0.045) 1px, transparent 1px);
   background-size: 100% 100%, 100% 100%, 28px 28px, 28px 28px;
 }
 
 .bg-console {
   background-image:
-    radial-gradient(ellipse 80% 55% at 30% 0%, rgba(47, 125, 92, 0.22), transparent 60%),
-    radial-gradient(ellipse 60% 45% at 90% 90%, rgba(224, 166, 60, 0.09), transparent 55%),
-    repeating-linear-gradient(0deg, rgba(216, 233, 221, 0.028) 0px, rgba(216, 233, 221, 0.028) 1px, transparent 1px, transparent 4px);
+    radial-gradient(ellipse 80% 55% at 30% 0%, rgba(99, 102, 241, 0.35), transparent 60%),
+    radial-gradient(ellipse 60% 45% at 90% 90%, rgba(245, 158, 11, 0.12), transparent 55%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.03) 0px, rgba(255, 255, 255, 0.03) 1px, transparent 1px, transparent 4px);
 }
 
 .bg-dark-grid {
   background-image:
-    linear-gradient(rgba(216, 233, 221, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(216, 233, 221, 0.05) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
   background-size: 26px 26px;
 }
 
@@ -86,10 +121,6 @@ body {
 }
 @keyframes rl-slide-left {
   from { opacity: 0; transform: translateX(28px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-@keyframes rl-drawer-in {
-  from { opacity: 0.4; transform: translateX(-100%); }
   to { opacity: 1; transform: translateX(0); }
 }
 @keyframes rl-toast {
@@ -119,6 +150,10 @@ body {
   from { background-position: -200% 0; }
   to { background-position: 200% 0; }
 }
+@keyframes rl-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
 
 .anim-rise { animation: rl-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .anim-pop { animation: rl-pop 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
@@ -126,23 +161,37 @@ body {
 .anim-toast { animation: rl-toast 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .anim-bar { animation: rl-bar 0.9s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .anim-blink { animation: rl-blink 1.6s ease-in-out infinite; }
+.anim-float { animation: rl-float 5s ease-in-out infinite; }
 
 .reveal-row { animation: rl-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
-
-/* stagger helper: set --i inline */
 .stagger { animation-delay: calc(var(--i, 0) * 45ms); }
 
 .skeleton {
-  background: linear-gradient(100deg, #e3e9e0 40%, #f2f5ef 50%, #e3e9e0 60%);
+  background: linear-gradient(100deg, #eceef4 40%, #f7f8fc 50%, #eceef4 60%);
   background-size: 200% 100%;
   animation: rl-shimmer 1.4s linear infinite;
+}
+.dark .skeleton {
+  background: linear-gradient(100deg, #1c2136 40%, #232948 50%, #1c2136 60%);
+  background-size: 200% 100%;
 }
 
 /* ---------- form primitives ---------- */
 input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.55; cursor: pointer; }
 
 .focus-ring { transition: box-shadow 0.15s ease, border-color 0.15s ease; }
-.focus-ring:focus { outline: none; border-color: var(--color-moss); box-shadow: 0 0 0 3px rgba(30, 92, 79, 0.18); }
-.focus-ring:focus-visible { outline: none; border-color: var(--color-moss); box-shadow: 0 0 0 3px rgba(30, 92, 79, 0.18); }
+.focus-ring:focus { outline: none; border-color: var(--color-pine); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.18); }
+.focus-ring:focus-visible { outline: none; border-color: var(--color-pine); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.18); }
 
 .tabular { font-variant-numeric: tabular-nums; }
+
+.card-hover { transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease; }
+.card-hover:hover { transform: translateY(-2px); box-shadow: var(--shadow-pop); }
+
+/* ---------- heatmap intensity ---------- */
+.heat-0 { background: rgba(79, 70, 229, 0.06); }
+.heat-1 { background: rgba(46, 155, 87, 0.22); }
+.heat-2 { background: rgba(46, 155, 87, 0.42); }
+.heat-3 { background: rgba(46, 155, 87, 0.66); }
+.heat-4 { background: rgba(34, 128, 68, 0.9); }
+.dark .heat-0 { background: rgba(129, 140, 248, 0.1); }

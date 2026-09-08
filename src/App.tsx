@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Sun, Moon } from "lucide-react";
 import { Sidebar, type NavRoute } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
 import { CategoryPage } from "./components/CategoryPage";
@@ -7,6 +8,7 @@ import { LogoMark } from "./components/icons";
 import { I } from "./components/icons";
 import { ToastHost } from "./components/ui";
 import { AuthProvider, useAuth } from "./state/AuthContext";
+import { ThemeProvider, useTheme } from "./state/ThemeContext";
 import { AuthGate } from "./components/AuthGate";
 
 function BootScreen() {
@@ -39,8 +41,28 @@ function RemindersView() {
 
 function Gate() {
   const { status } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [route, setRoute] = useState<NavRoute>({ view: "dashboard" });
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("sidebar_collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("sidebar_collapsed", String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (status === "guest") setRoute({ view: "dashboard" });
@@ -68,17 +90,23 @@ function Gate() {
           : "Your personal analytics";
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className="min-h-screen bg-bg transition-colors duration-200">
       <Sidebar
         route={route}
         onNavigate={setRoute}
         mobileOpen={mobileOpen}
         onCloseMobile={() => setMobileOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebar}
       />
 
-      <div className="lg:pl-[260px]">
+      <div
+        className={`transition-all duration-300 ease-in-out ${
+          sidebarCollapsed ? "lg:pl-[76px]" : "lg:pl-[260px]"
+        }`}
+      >
         {/* Top header */}
-        <header className="sticky top-0 z-30 border-b border-line bg-card/90 backdrop-blur-md">
+        <header className="sticky top-0 z-30 border-b border-line bg-card/90 backdrop-blur-md transition-colors duration-200">
           <div className="flex items-center gap-3 px-5 sm:px-7 h-[64px]">
             <button
               className="lg:hidden p-2 -ml-1 rounded-md text-ink-soft hover:text-ink hover:bg-bg-soft transition-colors focus-ring"
@@ -91,15 +119,31 @@ function Gate() {
               <h1 className="font-display font-bold text-[17px] leading-tight text-ink truncate">{title}</h1>
               <p className="text-[12px] text-ink-faint truncate hidden sm:block">{subtitle}</p>
             </div>
-            <div className="hidden sm:flex items-center gap-2">
-              <div className="flex items-center gap-2 rounded-lg border border-line bg-bg-soft px-3 py-1.5 text-[12.5px] text-ink-soft">
+
+            {/* Right actions */}
+            <div className="flex items-center gap-2.5">
+              {/* Date indicator */}
+              <div className="hidden sm:flex items-center gap-2 rounded-lg border border-line bg-bg-soft px-3 py-1.5 text-[12.5px] text-ink-soft">
                 <I name="calendar" size={14} />
                 <span>May 12 – May 18, 2026</span>
               </div>
-              <button className="p-2 rounded-lg border border-line bg-bg-soft text-ink-soft hover:text-ink hover:bg-bg transition-colors focus-ring" title="Toggle theme">
-                <I name="sun" size={15} />
+
+              {/* Light/Dark Mode Theme Toggle */}
+              <button
+                onClick={toggleTheme}
+                className="p-2 rounded-lg border border-line bg-bg-soft text-ink-soft hover:text-ink hover:bg-card transition-all duration-150 shadow-xs focus-ring"
+                title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                aria-label={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              >
+                {theme === "dark" ? (
+                  <Sun size={16} className="text-warn transition-transform duration-200 rotate-0 hover:rotate-45" />
+                ) : (
+                  <Moon size={16} className="text-primary transition-transform duration-200 rotate-0 hover:-rotate-12" />
+                )}
               </button>
-              <select className="text-[12.5px] font-medium text-ink border border-line rounded-lg px-3 py-1.5 bg-card focus-ring">
+
+              {/* Timeframe select */}
+              <select className="text-[12.5px] font-medium text-ink border border-line rounded-lg px-3 py-1.5 bg-card hover:bg-bg-soft transition-colors focus-ring cursor-pointer">
                 <option>This Week</option>
                 <option>Last Week</option>
                 <option>This Month</option>
@@ -108,7 +152,7 @@ function Gate() {
           </div>
         </header>
 
-        <main className="px-5 sm:px-7 py-6 max-w-[1400px]">
+        <main className="px-4 sm:px-6 lg:px-7 py-5 max-w-[1500px]">
           {route.view === "dashboard" ? (
             <Dashboard />
           ) : route.view === "category" ? (
@@ -126,9 +170,11 @@ function Gate() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Gate />
-      <ToastHost />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <Gate />
+        <ToastHost />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

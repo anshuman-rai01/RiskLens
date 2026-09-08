@@ -43,6 +43,46 @@
   --shadow-lg: 0 4px 6px rgba(17, 24, 39, 0.04), 0 12px 24px -6px rgba(17, 24, 39, 0.08);
 }
 
+/* ---------- dark theme overrides ---------- */
+.dark,
+[data-theme="dark"] {
+  --color-bg: #0F1117;
+  --color-bg-soft: #161922;
+  --color-card: #181B26;
+  --color-sidebar: #13151F;
+  --color-ink: #F3F4F6;
+  --color-ink-soft: #9CA3AF;
+  --color-ink-faint: #6B7280;
+  --color-ink-muted: #4B5563;
+  --color-line: #262B3B;
+  --color-line-strong: #373E54;
+
+  --color-primary: #7C6EED;
+  --color-primary-deep: #6858DE;
+  --color-primary-soft: rgba(124, 110, 237, 0.16);
+  --color-primary-faint: rgba(124, 110, 237, 0.24);
+  --color-primary-glow: rgba(124, 110, 237, 0.22);
+
+  --color-ok: #10B981;
+  --color-ok-soft: rgba(16, 185, 129, 0.16);
+  --color-ok-faint: rgba(16, 185, 129, 0.26);
+
+  --color-warn: #F59E0B;
+  --color-warn-soft: rgba(245, 158, 11, 0.16);
+  --color-warn-faint: rgba(245, 158, 11, 0.26);
+
+  --color-danger: #EF4444;
+  --color-danger-soft: rgba(239, 68, 68, 0.16);
+  --color-danger-faint: rgba(239, 68, 68, 0.26);
+
+  --color-info: #3B82F6;
+  --color-info-soft: rgba(59, 130, 246, 0.16);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4), 0 8px 20px -4px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.5), 0 16px 32px -6px rgba(0, 0, 0, 0.6);
+}
+
 html { scroll-behavior: smooth; }
 
 body {
@@ -50,14 +90,23 @@ body {
   background: var(--color-bg);
   color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 ::selection { background: rgba(91, 76, 196, 0.18); }
+.dark ::selection { background: rgba(124, 110, 237, 0.3); }
 
 * { scrollbar-width: thin; scrollbar-color: #D1D5DB transparent; }
+.dark * { scrollbar-color: #373E54 transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 8px; }
+.dark *::-webkit-scrollbar-thumb { background: #373E54; }
 *::-webkit-scrollbar-track { background: transparent; }
+
+.dark .skeleton {
+  background: linear-gradient(100deg, #181B26 40%, #222636 50%, #181B26 60%);
+  background-size: 200% 100%;
+}
 
 /* ---------- keyframes ---------- */
 @keyframes pl-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }

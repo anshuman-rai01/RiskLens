@@ -1,8 +1,15 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { dailyQuotes } from "./mockData";
 import { I, LogoMark } from "./icons";
 import { useAuth } from "../state/AuthContext";
+
+const DAILY_QUOTES = [
+  "Small daily improvements lead to stunning results.",
+  "The secret of getting ahead is getting started.",
+  "Focus on being productive instead of busy.",
+  "Discipline is the bridge between goals and accomplishment.",
+  "Your future is created by what you do today.",
+];
 
 export type NavRoute =
   | { view: "dashboard" }
@@ -19,13 +26,13 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard", route: { view: "dashboard" } },
-  { id: "activity", label: "Activity Tracker", icon: "activity", route: { view: "category", id: "fitness" } },
-  { id: "habits", label: "Habit Tracker", icon: "check", route: { view: "category", id: "habits" } },
-  { id: "productivity", label: "Productivity Analysis", icon: "brain", route: { view: "category", id: "study" } },
-  { id: "focus", label: "Focus Sessions", icon: "target", route: { view: "category", id: "academic" } },
-  { id: "goals", label: "Goals", icon: "flag", route: { view: "category", id: "goals" } },
-  { id: "insights", label: "Insights & Reports", icon: "chart", route: { view: "category", id: "income_expense" } },
-  { id: "calendar", label: "Calendar View", icon: "calendar", route: { view: "category", id: "savings" } },
+  { id: "income_expense", label: "Income & Expenses", icon: "chart", route: { view: "category", id: "income_expense" } },
+  { id: "savings", label: "Savings Records", icon: "calendar", route: { view: "category", id: "savings" } },
+  { id: "study", label: "Study Schedule", icon: "brain", route: { view: "category", id: "study" } },
+  { id: "academic", label: "Academic Performance", icon: "target", route: { view: "category", id: "academic" } },
+  { id: "fitness", label: "Fitness Activities", icon: "activity", route: { view: "category", id: "fitness" } },
+  { id: "habits", label: "Habit Tracking", icon: "check", route: { view: "category", id: "habits" } },
+  { id: "goals", label: "Personal Goals", icon: "flag", route: { view: "category", id: "goals" } },
   { id: "reminders", label: "Reminders", icon: "bell", route: { view: "reminders" } },
   { id: "settings", label: "Settings", icon: "settings", route: { view: "profile" } },
 ];
@@ -52,7 +59,7 @@ export function Sidebar({
   onToggleCollapse?: () => void;
 }) {
   const { user, logout } = useAuth();
-  const [quote] = useState(() => dailyQuotes[Math.floor(Math.random() * dailyQuotes.length)]);
+  const [quote] = useState(() => DAILY_QUOTES[Math.floor(Math.random() * DAILY_QUOTES.length)]);
   const firstName = (user?.email?.split("@")[0] ?? "Sankari").replace(/[^a-zA-Z]/g, "");
 
   // Content for desktop expanded or mobile drawer

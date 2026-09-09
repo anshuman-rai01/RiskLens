@@ -1,30 +1,263 @@
 /**
- * Repository layer — the client-side analogue of the FastAPI routers.
- * Every function resolves the acting user from the verified access token
- * (requireUserId) and scopes all reads/writes to that id. Isolation is enforced
- * here, at query level — the UI never receives another user's row.
+ * RiskLens Repository Layer — backed by FastAPI REST API
+ * 
+ * Replaces client-side localStorage/store.ts persistence with real endpoints:
+ * - /entries (generic behavioral time-series categories)
+ * - /goals (personal targets with computed progress and deadlines)
+ * - /profile (user compliance baselines and preferences)
  */
 
-import { ApiError, requireUserId } from "./auth";
+import { ApiError, apiRequest } from "./api";
 import { CATEGORIES } from "./categories";
 import { CURRENCY_SYMBOL } from "./currency";
-import { buildSampleEntries } from "./seed";
-import { readTable, uid, writeTable } from "./store";
+import { emitChange } from "./store";
 import { isNonNegativeNum, isValidDate, notFarFuture } from "./validation";
-import type { Category, Entry, EntryData, Profile, UserRole } from "./types";
+import type {
+  Category,
+  Entry,
+  EntryData,
+  GoalData,
+  IncomeExpenseData,
+  Profile,
+  SavingsData,
+  StudyData,
+  AcademicData,
+  FitnessData,
+  HabitData,
+  UserRole,
+} from "./types";
 
-const readEntries = () => readTable<Entry>("entries");
-const writeEntries = (rows: Entry[]) => writeTable("entries", rows);
-const readProfiles = () => readTable<Profile>("profiles");
-const writeProfiles = (rows: Profile[]) => writeTable("profiles", rows);
+export { ApiError };
 
-function assertOwn(entry: Entry | undefined, userId: string): Entry {
-  // Belt-and-braces: even a forged id can't cross the ownership boundary.
-  if (!entry || entry.userId !== userId) throw new ApiError("NOT_FOUND", "Entry not found.");
-  return entry;
+/* ---------------- backend response interfaces ---------------- */
+
+interface BackendEntry {
+  id: string;
+  category: string;
+  subcategory: string | null;
+  value: number | string;
+  unit: string | null;
+  occurred_at: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-/* ---------------- entry validation (schema-driven) ---------------- */
+interface BackendEntryList {
+  items: BackendEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+interface BackendGoal {
+  id: string;
+  name: string;
+  target_value: number | string;
+  current_value: number | string;
+  unit: string | null;
+  deadline: string | null;
+  progress_percent: number;
+  is_completed: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface BackendGoalList {
+  items: BackendGoal[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+interface BackendProfile {
+  user_id: string;
+  name: string;
+  age: number | null;
+  role: string;
+  currency: string;
+  monthly_spending_cap: number | string | null;
+  monthly_savings_target: number | string | null;
+  weekly_study_hours: number | string | null;
+  weekly_fitness_minutes: number | null;
+  weekly_habit_completions: number | null;
+  onboarded: boolean;
+  updated_at: string;
+}
+
+/* ---------------- mappers ---------------- */
+
+function mapBackendEntryToFrontend(b: BackendEntry): Entry {
+  const val = Number(b.value) || 0;
+  let data: EntryData;
+
+  switch (b.category) {
+    case "income_expense": {
+      const isIncome = b.notes === "income" || b.unit === "income";
+      data = {
+        kind: isIncome ? "income" : "expense",
+        amount: val,
+        label: b.subcategory || (b.notes && b.notes !== "income" && b.notes !== "expense" ? b.notes : "Expense"),
+      } as IncomeExpenseData;
+      break;
+    }
+    case "savings": {
+      data = {
+        amount: val,
+        vault: b.subcategory || "Savings",
+      } as SavingsData;
+      break;
+    }
+    case "study": {
+      data = {
+        subject: b.subcategory || "Study Session",
+        hours: val,
+        topic: b.notes || "",
+      } as StudyData;
+      break;
+    }
+    case "academic": {
+      data = {
+        course: b.subcategory || "Academics",
+        assessment: b.notes || "Assessment",
+        score: val,
+        maxScore: 100,
+      } as AcademicData;
+      break;
+    }
+    case "fitness": {
+      const validIntensities = ["low", "moderate", "high"] as const;
+      const intensity = validIntensities.includes(b.notes as any) ? (b.notes as "low" | "moderate" | "high") : "moderate";
+      data = {
+        activity: b.subcategory || "Workout",
+        minutes: Math.round(val),
+        intensity,
+      } as FitnessData;
+      break;
+    }
+    case "habits": {
+      data = {
+        habit: b.subcategory || "Daily Habit",
+        completed: val >= 1.0,
+      } as HabitData;
+      break;
+    }
+    default: {
+      data = {
+        title: b.subcategory || "Goal",
+        unit: b.unit || "units",
+        target: 100,
+        current: val,
+        deadline: null,
+      } as GoalData;
+    }
+  }
+
+  return {
+    id: b.id,
+    userId: "current_user",
+    category: b.category as Category,
+    data,
+    occurredOn: b.occurred_at,
+    note: b.notes || "",
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+    revisions: [],
+    derived: null,
+  };
+}
+
+function mapBackendGoalToFrontend(g: BackendGoal): Entry {
+  const target = Number(g.target_value) || 0;
+  const current = Number(g.current_value) || 0;
+
+  const data: GoalData = {
+    title: g.name,
+    unit: g.unit || "units",
+    target,
+    current,
+    deadline: g.deadline,
+  };
+
+  return {
+    id: g.id,
+    userId: "current_user",
+    category: "goals",
+    data,
+    occurredOn: g.created_at ? g.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+    note: g.is_completed ? "Completed" : `${g.progress_percent}% completed`,
+    createdAt: g.created_at,
+    updatedAt: g.updated_at,
+    revisions: [],
+    derived: null,
+  };
+}
+
+function mapFrontendToBackendEntryPayload(
+  category: Category,
+  raw: Record<string, unknown>,
+  occurredOn: string,
+  note: string
+) {
+  let subcategory: string | null = null;
+  let value = 0;
+  let unit: string | null = null;
+  let notes = (note || "").trim();
+
+  switch (category) {
+    case "income_expense": {
+      value = Number(raw.amount) || 0;
+      unit = "INR";
+      subcategory = String(raw.label || raw.kind || "Expense");
+      notes = String(raw.kind || "expense");
+      break;
+    }
+    case "savings": {
+      value = Number(raw.amount) || 0;
+      unit = "INR";
+      subcategory = String(raw.vault || "Savings");
+      break;
+    }
+    case "study": {
+      value = Number(raw.hours) || 0;
+      unit = "hours";
+      subcategory = String(raw.subject || "Study");
+      notes = String(raw.topic || note || "");
+      break;
+    }
+    case "academic": {
+      value = Number(raw.score) || 0;
+      unit = "score";
+      subcategory = String(raw.course || "Academics");
+      notes = String(raw.assessment || note || "");
+      break;
+    }
+    case "fitness": {
+      value = Number(raw.minutes) || 0;
+      unit = "minutes";
+      subcategory = String(raw.activity || "Activity");
+      notes = String(raw.intensity || "moderate");
+      break;
+    }
+    case "habits": {
+      value = (raw.completed === true || raw.completed === "true") ? 1.0 : 0.0;
+      unit = "count";
+      subcategory = String(raw.habit || "Habit");
+      break;
+    }
+  }
+
+  return {
+    category,
+    subcategory: subcategory ? subcategory.slice(0, 200) : null,
+    value,
+    unit,
+    occurred_at: occurredOn,
+    notes: notes ? notes.slice(0, 500) : null,
+  };
+}
+
+/* ---------------- entry validation ---------------- */
 
 export function validateEntryPayload(
   category: Category,
@@ -89,18 +322,30 @@ export function validateEntryPayload(
   return { errors, data: clean as unknown as EntryData };
 }
 
-/* ---------------- entries CRUD ---------------- */
+/* ---------------- entries & goals CRUD ---------------- */
 
 export async function listEntries(category?: Category): Promise<Entry[]> {
-  const me = await requireUserId();
-  return readEntries()
-    .filter((e) => e.userId === me && (!category || e.category === category))
-    .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.createdAt.localeCompare(a.createdAt));
+  if (category === "goals") {
+    const res = await apiRequest<BackendGoalList>("/goals?limit=200");
+    return (res.items || []).map(mapBackendGoalToFrontend);
+  }
+
+  const query = category ? `?category=${category}&limit=200` : "?limit=200";
+  const res = await apiRequest<BackendEntryList>(`/entries${query}`);
+  return (res.items || []).map(mapBackendEntryToFrontend);
 }
 
 export async function getEntry(id: string): Promise<Entry> {
-  const me = await requireUserId();
-  return assertOwn(readEntries().find((e) => e.id === id), me);
+  try {
+    const res = await apiRequest<BackendEntry>(`/entries/${id}`);
+    return mapBackendEntryToFrontend(res);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      const g = await apiRequest<BackendGoal>(`/goals/${id}`);
+      return mapBackendGoalToFrontend(g);
+    }
+    throw err;
+  }
 }
 
 export async function createEntry(
@@ -109,25 +354,34 @@ export async function createEntry(
   occurredOn: string,
   note: string,
 ): Promise<Entry> {
-  const me = await requireUserId();
-  const { errors, data } = validateEntryPayload(category, raw, occurredOn);
-  const firstErr = Object.values(errors)[0];
-  if (firstErr) throw new ApiError("VALIDATION", firstErr);
-  const now = new Date().toISOString();
-  const entry: Entry = {
-    id: uid("ent"),
-    userId: me,
-    category,
-    data,
-    occurredOn,
-    note: (note ?? "").trim().slice(0, 200),
-    createdAt: now,
-    updatedAt: now,
-    revisions: [],
-    derived: null,
-  };
-  writeEntries([...readEntries(), entry]);
-  return entry;
+  if (category === "goals") {
+    const name = String(raw.title || raw.name || "Goal").trim();
+    const targetVal = Number(raw.target || raw.target_value) || 100;
+    const currentVal = Number(raw.current || raw.current_value) || 0;
+    const unit = String(raw.unit || "units").trim();
+    const deadline = raw.deadline ? String(raw.deadline) : null;
+
+    const res = await apiRequest<BackendGoal>("/goals", {
+      method: "POST",
+      body: JSON.stringify({
+        title: name,
+        target: targetVal,
+        current: currentVal,
+        unit,
+        deadline,
+      }),
+    });
+    emitChange();
+    return mapBackendGoalToFrontend(res);
+  }
+
+  const payload = mapFrontendToBackendEntryPayload(category, raw, occurredOn, note);
+  const res = await apiRequest<BackendEntry>("/entries", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  emitChange();
+  return mapBackendEntryToFrontend(res);
 }
 
 export async function updateEntry(
@@ -136,47 +390,75 @@ export async function updateEntry(
   occurredOn: string,
   note: string,
 ): Promise<Entry> {
-  const me = await requireUserId();
-  const rows = readEntries();
-  const existing = assertOwn(rows.find((e) => e.id === id), me);
-  const { errors, data } = validateEntryPayload(existing.category, raw, occurredOn);
-  const firstErr = Object.values(errors)[0];
-  if (firstErr) throw new ApiError("VALIDATION", firstErr);
+  // Check if updating a goal
+  if (raw.title !== undefined || raw.target !== undefined) {
+    const updatePayload: Record<string, unknown> = {};
+    if (raw.title !== undefined) updatePayload.title = String(raw.title).trim();
+    if (raw.target !== undefined) updatePayload.target = Number(raw.target);
+    if (raw.current !== undefined) updatePayload.current = Number(raw.current);
+    if (raw.unit !== undefined) updatePayload.unit = String(raw.unit).trim();
+    if (raw.deadline !== undefined) updatePayload.deadline = raw.deadline || null;
 
-  // History is append-only: the pre-edit state becomes a revision. Never overwritten.
-  const revision = {
-    data: existing.data,
-    occurredOn: existing.occurredOn,
-    note: existing.note,
-    archivedAt: new Date().toISOString(),
+    const res = await apiRequest<BackendGoal>(`/goals/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(updatePayload),
+    });
+    emitChange();
+    return mapBackendGoalToFrontend(res);
+  }
+
+  // Update entry
+  let value = 0;
+  let unit: string | null = null;
+  let notes = (note || "").trim();
+
+  if (raw.amount !== undefined) {
+    value = Number(raw.amount);
+    unit = "INR";
+  } else if (raw.hours !== undefined) {
+    value = Number(raw.hours);
+    unit = "hours";
+  } else if (raw.minutes !== undefined) {
+    value = Number(raw.minutes);
+    unit = "minutes";
+  } else if (raw.score !== undefined) {
+    value = Number(raw.score);
+    unit = "score";
+  } else if (raw.completed !== undefined) {
+    value = (raw.completed === true || raw.completed === "true") ? 1.0 : 0.0;
+    unit = "count";
+  }
+
+  const updateBody = {
+    value,
+    unit,
+    occurred_at: occurredOn,
+    notes: notes || null,
   };
-  const updated: Entry = {
-    ...existing,
-    data,
-    occurredOn,
-    note: (note ?? "").trim().slice(0, 200),
-    updatedAt: new Date().toISOString(),
-    revisions: [...existing.revisions, revision].slice(-24),
-  };
-  writeEntries(rows.map((e) => (e.id === id ? updated : e)));
-  return updated;
+
+  const res = await apiRequest<BackendEntry>(`/entries/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(updateBody),
+  });
+  emitChange();
+  return mapBackendEntryToFrontend(res);
 }
 
 export async function deleteEntry(id: string): Promise<void> {
-  const me = await requireUserId();
-  const rows = readEntries();
-  assertOwn(rows.find((e) => e.id === id), me);
-  writeEntries(rows.filter((e) => e.id !== id));
+  try {
+    await apiRequest(`/entries/${id}`, { method: "DELETE" });
+    emitChange();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      await apiRequest(`/goals/${id}`, { method: "DELETE" });
+      emitChange();
+      return;
+    }
+    throw err;
+  }
 }
 
 /* ---------------- profile ---------------- */
-
-export async function getProfile(): Promise<Profile> {
-  const me = await requireUserId();
-  const p = readProfiles().find((x) => x.userId === me);
-  if (!p) throw new ApiError("NOT_FOUND", "Profile not found.");
-  return p;
-}
 
 export interface ProfilePatch {
   name: string;
@@ -190,140 +472,109 @@ export interface ProfilePatch {
   weeklyHabitCompletions: string | null;
 }
 
-function parseLimit(v: string | null, label: string): number | null {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  if (!isNonNegativeNum(n) || n > 10_000_000) throw new ApiError("VALIDATION", `${label} must be 0 or a positive number.`);
-  return Math.round(n * 100) / 100;
+function mapBackendProfileToFrontend(p: BackendProfile): Profile {
+  return {
+    userId: p.user_id,
+    name: p.name || "",
+    age: p.age,
+    role: (p.role as UserRole) || "student",
+    currency: CURRENCY_SYMBOL,
+    monthlySpendingCap: p.monthly_spending_cap != null ? Number(p.monthly_spending_cap) : null,
+    monthlySavingsTarget: p.monthly_savings_target != null ? Number(p.monthly_savings_target) : null,
+    weeklyStudyHours: p.weekly_study_hours != null ? Number(p.weekly_study_hours) : null,
+    weeklyFitnessMinutes: p.weekly_fitness_minutes != null ? Number(p.weekly_fitness_minutes) : null,
+    weeklyHabitCompletions: p.weekly_habit_completions != null ? Number(p.weekly_habit_completions) : null,
+    updatedAt: p.updated_at,
+  };
+}
+
+export async function getProfile(): Promise<Profile> {
+  const p = await apiRequest<BackendProfile>("/profile");
+  return mapBackendProfileToFrontend(p);
 }
 
 export async function updateProfile(patch: ProfilePatch): Promise<Profile> {
-  const me = await requireUserId();
   const name = patch.name.trim();
   if (!name) throw new ApiError("VALIDATION", "Name is required.", "name");
   if (name.length > 60) throw new ApiError("VALIDATION", "Keep the name under 60 characters.", "name");
+
   let age: number | null = null;
   if (patch.age != null && patch.age !== "") {
     age = Number(patch.age);
-    if (!Number.isInteger(age) || age < 10 || age > 100) throw new ApiError("VALIDATION", "Age must be between 10 and 100.", "age");
-  }
-  // Application currency is fixed to INR (₹) — client-supplied symbols are ignored.
-  const currency = CURRENCY_SYMBOL;
-  const roles: UserRole[] = ["student", "professional", "freelancer", "other"];
-  if (!roles.includes(patch.role)) throw new ApiError("VALIDATION", "Pick a valid role.", "role");
-
-  const next: Profile = {
-    userId: me,
-    name,
-    age,
-    role: patch.role,
-    currency,
-    monthlySpendingCap: parseLimit(patch.monthlySpendingCap, "Spending cap"),
-    monthlySavingsTarget: parseLimit(patch.monthlySavingsTarget, "Savings target"),
-    weeklyStudyHours: parseLimit(patch.weeklyStudyHours, "Study target"),
-    weeklyFitnessMinutes: parseLimit(patch.weeklyFitnessMinutes, "Fitness target"),
-    weeklyHabitCompletions: parseLimit(patch.weeklyHabitCompletions, "Habit target"),
-    updatedAt: new Date().toISOString(),
-  };
-  const rows = readProfiles();
-  const exists = rows.some((p) => p.userId === me);
-  writeProfiles(exists ? rows.map((p) => (p.userId === me ? next : p)) : [...rows, next]);
-  return next;
-}
-
-/* ---------------- aggregates (plain arithmetic — the Milestone-2 model layer sits above this) ---------------- */
-
-export interface Overview {
-  monthSpent: number;
-  monthIncome: number;
-  monthSaved: number;
-  studyHours7: number;
-  fitnessMin7: number;
-  habitHits7: number;
-  counts: Record<Category, number>;
-  totalEntries: number;
-  entries7: number;
-  recent: Entry[];
-  goals: Entry[];
-  memberSince: string;
-}
-
-export function monthKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-export async function getOverview(): Promise<Overview> {
-  const me = await requireUserId();
-  const all = readEntries().filter((e) => e.userId === me);
-  const now = new Date();
-  const mk = monthKey(now);
-  const cutoff7 = new Date(now.getTime() - 7 * 86_400_000).toISOString().slice(0, 10);
-
-  const counts = {
-    income_expense: 0,
-    savings: 0,
-    study: 0,
-    academic: 0,
-    fitness: 0,
-    habits: 0,
-    goals: 0,
-  } as Record<Category, number>;
-  let monthSpent = 0;
-  let monthIncome = 0;
-  let monthSaved = 0;
-  let studyHours7 = 0;
-  let fitnessMin7 = 0;
-  let habitHits7 = 0;
-  let entries7 = 0;
-
-  for (const e of all) {
-    counts[e.category] += 1;
-    if (e.occurredOn >= cutoff7) entries7 += 1;
-    const inMonth = e.occurredOn.slice(0, 7) === mk;
-    if (e.category === "income_expense") {
-      const d = e.data as { kind: string; amount: number };
-      if (inMonth) {
-        if (d.kind === "expense") monthSpent += d.amount;
-        else monthIncome += d.amount;
-      }
-    } else if (e.category === "savings" && inMonth) {
-      monthSaved += (e.data as { amount: number }).amount;
-    } else if (e.category === "study" && e.occurredOn >= cutoff7) {
-      studyHours7 += (e.data as { hours: number }).hours;
-    } else if (e.category === "fitness" && e.occurredOn >= cutoff7) {
-      fitnessMin7 += (e.data as { minutes: number }).minutes;
-    } else if (e.category === "habits" && e.occurredOn >= cutoff7) {
-      if ((e.data as { completed: boolean }).completed) habitHits7 += 1;
+    if (!Number.isInteger(age) || age < 10 || age > 100) {
+      throw new ApiError("VALIDATION", "Age must be between 10 and 100.", "age");
     }
   }
 
-  const recent = [...all]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 9);
-  const goals = all
-    .filter((e) => e.category === "goals")
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-
-  const profile = readProfiles().find((p) => p.userId === me);
-  return {
-    monthSpent: Math.round(monthSpent * 100) / 100,
-    monthIncome: Math.round(monthIncome * 100) / 100,
-    monthSaved: Math.round(monthSaved * 100) / 100,
-    studyHours7: Math.round(studyHours7 * 4) / 4,
-    fitnessMin7: Math.round(fitnessMin7),
-    habitHits7,
-    counts,
-    totalEntries: all.length,
-    entries7,
-    recent,
-    goals,
-    memberSince: profile?.updatedAt ?? new Date().toISOString(),
+  const payload = {
+    name,
+    age,
+    role: patch.role,
+    currency: "INR",
+    monthly_spending_cap: patch.monthlySpendingCap ? Number(patch.monthlySpendingCap) : null,
+    monthly_savings_target: patch.monthlySavingsTarget ? Number(patch.monthlySavingsTarget) : null,
+    weekly_study_hours: patch.weeklyStudyHours ? Number(patch.weeklyStudyHours) : null,
+    weekly_fitness_minutes: patch.weeklyFitnessMinutes ? Number(patch.weeklyFitnessMinutes) : null,
+    weekly_habit_completions: patch.weeklyHabitCompletions ? Number(patch.weeklyHabitCompletions) : null,
+    onboarded: true,
   };
+
+  const p = await apiRequest<BackendProfile>("/profile", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  emitChange();
+  return mapBackendProfileToFrontend(p);
 }
 
-export async function generateSampleEntries(): Promise<number> {
-  const me = await requireUserId();
-  const sample = buildSampleEntries(me);
-  writeEntries([...readEntries(), ...sample]);
-  return sample.length;
+/* ---------------- forecasts & alerts ---------------- */
+
+export interface ForecastPoint {
+  date: string;
+  predicted: number;
+  lower: number;
+  upper: number;
 }
+
+export interface ForecastResult {
+  category: string;
+  subcategory: string | null;
+  reliability: "insufficient" | "low_confidence" | "reliable";
+  data_point_count: number;
+  generated_at: string;
+  message?: string | null;
+  forecast_points: ForecastPoint[];
+}
+
+export interface AlertItem {
+  id: string;
+  category: string;
+  subcategory: string | null;
+  kind: "threshold" | "trend";
+  severity: "info" | "warning" | "risk";
+  message: string;
+  triggered_at: string;
+  resolved_at: string | null;
+}
+
+export interface AlertList {
+  items: AlertItem[];
+  total: number;
+}
+
+export async function getForecast(
+  category: string,
+  subcategory?: string,
+  horizonDays = 14,
+): Promise<ForecastResult> {
+  let url = `/forecast?category=${encodeURIComponent(category)}&horizon_days=${horizonDays}`;
+  if (subcategory) {
+    url += `&subcategory=${encodeURIComponent(subcategory)}`;
+  }
+  return apiRequest<ForecastResult>(url);
+}
+
+export async function getAlerts(status: "active" | "all" = "active"): Promise<AlertList> {
+  return apiRequest<AlertList>(`/alerts?status=${status}`);
+}
+

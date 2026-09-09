@@ -3,3 +3,16 @@ node_modules/
 dist/
 build/
 *.log
+
+# Backend
+backend/.env
+backend/.env.*
+!backend/.env.example
+__pycache__/
+*.pyc
+.venv/
+backend/.venv/
+backend/venv/
+backend/.pytest_cache/
+*.zip
+

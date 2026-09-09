@@ -154,7 +154,7 @@ function Gate() {
 
         <main className="px-4 sm:px-6 lg:px-7 py-5 max-w-[1500px]">
           {route.view === "dashboard" ? (
-            <Dashboard />
+            <Dashboard onNavigate={setRoute} />
           ) : route.view === "category" ? (
             <CategoryPage key={route.id} category={route.id} />
           ) : route.view === "reminders" ? (

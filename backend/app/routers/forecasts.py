@@ -55,6 +55,12 @@ async def get_forecast(
       - >= 28 points: 'reliable'
     """
     sub_val = subcategory.strip() if subcategory else None
+    entry_filters = [
+        Entry.user_id == current_user.id,
+        Entry.category == category,
+    ]
+    if sub_val is not None:
+        entry_filters.append(Entry.subcategory == sub_val)
 
     # 1. Check for existing cached forecast
     forecast_stmt = select(Forecast).where(
@@ -67,9 +73,7 @@ async def get_forecast(
     # 2. Check if cache is fresh (matching horizon and no newer/modified entries)
     if cached_forecast is not None and cached_forecast.horizon_days == horizon_days:
         stale_check = select(func.count()).select_from(Entry).where(
-            Entry.user_id == current_user.id,
-            Entry.category == category,
-            Entry.subcategory == sub_val if sub_val is not None else Entry.subcategory.is_(None),
+            *entry_filters,
             (
                 (Entry.created_at > cached_forecast.generated_at)
                 | (Entry.updated_at > cached_forecast.generated_at)
@@ -99,9 +103,7 @@ async def get_forecast(
     entries_stmt = (
         select(Entry)
         .where(
-            Entry.user_id == current_user.id,
-            Entry.category == category,
-            Entry.subcategory == sub_val if sub_val is not None else Entry.subcategory.is_(None),
+            *entry_filters,
             Entry.deleted_at.is_(None),
         )
         .order_by(Entry.occurred_at.asc())

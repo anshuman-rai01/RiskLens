@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { I, LogoMark } from "./icons";
+import { useDataVersion } from "./ui";
 import { useAuth } from "../state/AuthContext";
+import { getProfile } from "../lib/db";
 
 const DAILY_QUOTES = [
   "Small daily improvements lead to stunning results.",
@@ -59,8 +61,21 @@ export function Sidebar({
   onToggleCollapse?: () => void;
 }) {
   const { user, logout } = useAuth();
+  const version = useDataVersion();
   const [quote] = useState(() => DAILY_QUOTES[Math.floor(Math.random() * DAILY_QUOTES.length)]);
-  const firstName = (user?.email?.split("@")[0] ?? "Sankari").replace(/[^a-zA-Z]/g, "");
+  const [profileName, setProfileName] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getProfile()
+      .then((p) => { if (active) setProfileName(p.name || null); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [version]);
+
+  // Display name: profile name if set, otherwise capitalized email local-part
+  const emailLocal = user?.email?.split("@")[0] ?? "User";
+  const displayName = profileName || (emailLocal.charAt(0).toUpperCase() + emailLocal.slice(1));
 
   // Content for desktop expanded or mobile drawer
   const fullContent = (
@@ -70,10 +85,10 @@ export function Sidebar({
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-full bg-gradient-primary flex items-center justify-center text-white font-display font-bold text-[14px] shrink-0 shadow-sm">
-              {firstName.charAt(0).toUpperCase()}
+              {displayName.charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-[13.5px] font-semibold text-ink truncate">Hello, {firstName} 👋</p>
+              <p className="text-[13.5px] font-semibold text-ink truncate">Hello, {displayName} 👋</p>
               <p className="text-[11px] text-ink-faint truncate">Focus on progress, not perfection.</p>
             </div>
           </div>
@@ -161,9 +176,9 @@ export function Sidebar({
         )}
         <div
           className="w-9 h-9 rounded-full bg-gradient-primary flex items-center justify-center text-white font-display font-bold text-[13px] shrink-0 shadow-sm"
-          title={`Hello, ${firstName}`}
+          title={`Hello, ${displayName}`}
         >
-          {firstName.charAt(0).toUpperCase()}
+          {displayName.charAt(0).toUpperCase()}
         </div>
       </div>
 

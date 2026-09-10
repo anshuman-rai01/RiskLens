@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Sun, Moon } from "lucide-react";
 import { Sidebar, type NavRoute } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
@@ -64,6 +64,40 @@ function Gate() {
     });
   };
 
+  // Date range state
+  const [timeframe, setTimeframe] = useState<"this_week" | "last_week" | "this_month">("this_week");
+
+  const { startDate, endDate, dateLabel } = useMemo(() => {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+    if (timeframe === "this_week") {
+      const start = new Date(now);
+      start.setDate(now.getDate() - diffToMonday);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+      return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), dateLabel: `${fmt(start)} – ${fmt(end)}` };
+    } else if (timeframe === "last_week") {
+      const thisMonday = new Date(now);
+      thisMonday.setDate(now.getDate() - diffToMonday);
+      const start = new Date(thisMonday);
+      start.setDate(thisMonday.getDate() - 7);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+      return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), dateLabel: `${fmt(start)} – ${fmt(end)}` };
+    } else {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return { startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), dateLabel: `${fmt(start)} – ${fmt(end)}` };
+    }
+  }, [timeframe]);
+
   useEffect(() => {
     if (status === "guest") setRoute({ view: "dashboard" });
   }, [status]);
@@ -125,7 +159,7 @@ function Gate() {
               {/* Date indicator */}
               <div className="hidden sm:flex items-center gap-2 rounded-lg border border-line bg-bg-soft px-3 py-1.5 text-[12.5px] text-ink-soft">
                 <I name="calendar" size={14} />
-                <span>May 12 – May 18, 2026</span>
+                <span>{dateLabel}</span>
               </div>
 
               {/* Light/Dark Mode Theme Toggle */}
@@ -143,10 +177,14 @@ function Gate() {
               </button>
 
               {/* Timeframe select */}
-              <select className="text-[12.5px] font-medium text-ink border border-line rounded-lg px-3 py-1.5 bg-card hover:bg-bg-soft transition-colors focus-ring cursor-pointer">
-                <option>This Week</option>
-                <option>Last Week</option>
-                <option>This Month</option>
+              <select
+                value={timeframe}
+                onChange={(e) => setTimeframe(e.target.value as "this_week" | "last_week" | "this_month")}
+                className="text-[12.5px] font-medium text-ink border border-line rounded-lg px-3 py-1.5 bg-card hover:bg-bg-soft transition-colors focus-ring cursor-pointer"
+              >
+                <option value="this_week">This Week</option>
+                <option value="last_week">Last Week</option>
+                <option value="this_month">This Month</option>
               </select>
             </div>
           </div>
@@ -154,7 +192,7 @@ function Gate() {
 
         <main className="px-4 sm:px-6 lg:px-7 py-5 max-w-[1500px]">
           {route.view === "dashboard" ? (
-            <Dashboard onNavigate={setRoute} />
+            <Dashboard onNavigate={setRoute} startDate={startDate} endDate={endDate} />
           ) : route.view === "category" ? (
             <CategoryPage key={route.id} category={route.id} />
           ) : route.view === "reminders" ? (

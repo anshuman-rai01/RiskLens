@@ -27,6 +27,8 @@ import type { NavRoute } from "./Sidebar";
 
 interface DashboardProps {
   onNavigate?: (route: NavRoute) => void;
+  startDate?: string;
+  endDate?: string;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -41,7 +43,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-export function Dashboard({ onNavigate }: DashboardProps) {
+export function Dashboard({ onNavigate, startDate, endDate }: DashboardProps) {
   const { isDark } = useTheme();
   const version = useDataVersion();
 
@@ -111,23 +113,26 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     };
   }, [forecastCategory, version]);
 
+  // ── Date-range filtered entries ──
+  const filteredEntries = (startDate && endDate)
+    ? entries.filter((e) => e.occurredOn >= startDate && e.occurredOn <= endDate)
+    : entries;
+
   // Calculations for real KPI cards
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
   const entriesLast7Days = entries.filter((e) => new Date(e.occurredOn) >= sevenDaysAgo);
 
-  // Study hours
-  const studyEntries = entries.filter((e) => e.category === "study");
-  const totalStudyHours = studyEntries.reduce((acc, e) => {
+  // Study hours (filtered by date range)
+  const studyEntriesFiltered = filteredEntries.filter((e) => e.category === "study");
+  const totalStudyHours = studyEntriesFiltered.reduce((acc, e) => {
     const d = e.data as StudyData;
     return acc + (Number(d.hours) || 0);
   }, 0);
-  const studyHoursLast7 = studyEntries
-    .filter((e) => new Date(e.occurredOn) >= sevenDaysAgo)
-    .reduce((acc, e) => acc + (Number((e.data as StudyData).hours) || 0), 0);
+  const studyHoursLabel = `${totalStudyHours.toFixed(1)} hrs in range`;
 
-  // Goal average progress
+  // Goal average progress (not date-filtered — goals are cumulative targets)
   const avgGoalProgress = goals.length
     ? Math.min(
         100,
@@ -145,13 +150,13 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   // Active risk alerts count
   const riskAlertsCount = alerts.filter((a) => a.severity === "risk").length;
 
-  // Category distribution for donut chart
+  // Category distribution for donut chart (filtered by date range)
   const categoryCounts: Record<string, number> = {};
-  entries.forEach((e) => {
+  filteredEntries.forEach((e) => {
     categoryCounts[e.category] = (categoryCounts[e.category] || 0) + 1;
   });
 
-  const totalEntries = entries.length;
+  const totalEntries = filteredEntries.length;
   const timeAllocationData = Object.entries(categoryCounts).map(([cat, count]) => {
     const meta = CATEGORIES[cat as keyof typeof CATEGORIES];
     const pct = totalEntries > 0 ? Math.round((count / totalEntries) * 100) : 0;
@@ -163,16 +168,16 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     };
   });
 
-  // 7-day sparkline counts
+  // 7-day sparkline counts (uses filteredEntries for current range)
   const last7DaysSparkline = Array.from({ length: 7 }, (_, i) => {
     const targetDate = new Date(now.getTime() - (6 - i) * 24 * 60 * 60 * 1000);
     const dateStr = targetDate.toISOString().slice(0, 10);
-    return entries.filter((e) => e.occurredOn === dateStr).length;
+    return filteredEntries.filter((e) => e.occurredOn === dateStr).length;
   });
 
-  // Day of week activity distribution for heatmap
+  // Day of week activity distribution for heatmap (filtered by date range)
   const dayActivityCounts = [0, 0, 0, 0, 0, 0, 0]; // Sun to Sat
-  entries.forEach((e) => {
+  filteredEntries.forEach((e) => {
     try {
       const d = new Date(e.occurredOn);
       if (!isNaN(d.getTime())) {
@@ -183,7 +188,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     }
   });
 
-  // Top and least active day
+  // Top and least active day (derived from real filtered entry data — Fix 7 confirmed)
   const maxDayVal = Math.max(...dayActivityCounts, 1);
   const mostActiveDayIndex = dayActivityCounts.indexOf(Math.max(...dayActivityCounts));
   const leastActiveDayIndex = dayActivityCounts.indexOf(Math.min(...dayActivityCounts));
@@ -194,8 +199,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const kpis = [
     {
       label: "Total Records",
-      value: `${entries.length}`,
-      trend: `${entriesLast7Days.length} this week`,
+      value: `${filteredEntries.length}`,
+      trend: `${entries.length} total`,
       icon: "database",
       iconBg: "bg-primary-soft",
       iconColor: "text-primary",
@@ -205,7 +210,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     {
       label: "Study & Focus",
       value: `${totalStudyHours.toFixed(1)} hrs`,
-      trend: `${studyHoursLast7.toFixed(1)}h this week`,
+      trend: studyHoursLabel,
       icon: "clock",
       iconBg: "bg-info-soft",
       iconColor: "text-info",
@@ -224,7 +229,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     },
     {
       label: "Habits & Routine",
-      value: `${entries.filter((e) => e.category === "habits").length} Logged`,
+      value: `${filteredEntries.filter((e) => e.category === "habits").length} Logged`,
       trend: "Daily routine track",
       icon: "star",
       iconBg: "bg-warn-soft",
@@ -309,6 +314,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 <option value="fitness">Fitness</option>
                 <option value="habits">Habits</option>
                 <option value="savings">Savings</option>
+                <option value="academic">Academics</option>
               </select>
             </div>
 
@@ -729,7 +735,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 </div>
                 <p className="text-[11.5px] text-ink-soft leading-relaxed">
                   {entries.length > 0
-                    ? `You logged ${entriesLast7Days.length} records this week. Peak logging day was ${mostActiveDayName}.`
+                    ? `You logged ${filteredEntries.length} records in this range. Peak logging day was ${mostActiveDayName}.`
                     : "Welcome to RiskLens! Start recording entries across your study, habit, and financial categories."}
                 </p>
               </div>

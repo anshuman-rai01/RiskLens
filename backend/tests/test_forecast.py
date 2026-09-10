@@ -275,6 +275,52 @@ async def test_forecast_prophet_fallback_sanitized(caplog):
                 assert sensitive_error in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_forecast_aggregates_subcategorized_entries_when_subcategory_omitted():
+    timestamp = int(time.time() * 1000)
+    user_email = f"forecast_aggregate_{timestamp}@example.com"
+    password = "SecurePassword123!"
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        register_resp = await client.post(
+            "/auth/register",
+            json={"email": user_email, "password": password},
+        )
+        assert register_resp.status_code == 201
+        headers = {"Authorization": f"Bearer {register_resp.json()['access_token']}"}
+        today = date.today()
+
+        for i in range(14):
+            subcategory = "shopping" if i < 7 else "travel"
+            entry_resp = await client.post(
+                "/entries",
+                json={
+                    "category": "income_expense",
+                    "subcategory": subcategory,
+                    "value": str(100 + i),
+                    "unit": "INR",
+                    "occurred_at": (today - timedelta(days=20 - i)).isoformat(),
+                },
+                headers=headers,
+            )
+            assert entry_resp.status_code == 201, entry_resp.text
+
+        aggregate_resp = await client.get(
+            "/forecast?category=income_expense&horizon_days=14",
+            headers=headers,
+        )
+        assert aggregate_resp.status_code == 200, aggregate_resp.text
+        assert aggregate_resp.json()["data_point_count"] == 14
+
+        subcategory_resp = await client.get(
+            "/forecast?category=income_expense&subcategory=shopping&horizon_days=14",
+            headers=headers,
+        )
+        assert subcategory_resp.status_code == 200, subcategory_resp.text
+        assert subcategory_resp.json()["data_point_count"] == 7
+
+
 if __name__ == "__main__":
     asyncio.run(test_forecast_full_flow())
     print("All forecast tests passed!")

@@ -9,12 +9,13 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.entry import Entry
+from app.models.forecast import Forecast
 from app.models.user import User
 from app.schemas.entry import (
     EntryCategory,
@@ -60,6 +61,7 @@ async def create_entry(
         subcategory=payload.subcategory,
         value=payload.value,
         unit=payload.unit,
+        max_value=payload.max_value,
         occurred_at=payload.occurred_at,
         notes=payload.notes,
     )
@@ -167,7 +169,7 @@ async def update_entry(
 ) -> Entry:
     """
     Update editable fields of an existing entry.
-    Category and subcategory are immutable and cannot be updated.
+    Category is immutable. Subcategory (the user-facing label) is editable.
     """
     stmt = select(Entry).where(
         Entry.id == entry_id,
@@ -189,8 +191,28 @@ async def update_entry(
         # Nothing changed
         return entry
 
+    # Forecasts are cached per (user, category, subcategory) and the staleness check
+    # only looks at entries that CURRENTLY belong to a series. An entry that moves out
+    # of a series would leave that series' cache looking fresh while still containing
+    # the moved point, so drop the old series' cache; it is rebuilt on the next request.
+    old_subcategory = entry.subcategory
+    subcategory_changed = (
+        "subcategory" in update_data and update_data["subcategory"] != old_subcategory
+    )
+
     for field, value in update_data.items():
         setattr(entry, field, value)
+
+    if subcategory_changed:
+        await db.execute(
+            delete(Forecast).where(
+                Forecast.user_id == current_user.id,
+                Forecast.category == entry.category,
+                Forecast.subcategory == old_subcategory
+                if old_subcategory is not None
+                else Forecast.subcategory.is_(None),
+            )
+        )
 
     # Apply category-aware value formatting if value was updated
     if "value" in update_data and entry.value is not None:

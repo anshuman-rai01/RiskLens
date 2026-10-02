@@ -103,10 +103,11 @@ export const CATEGORIES: Record<Category, CategoryMeta> = {
     accent: "#2E9B57",
     verb: "Log result",
     fields: [
-      { key: "course", label: "Project", type: "text", required: true, half: true, placeholder: "ML Algorithms" },
-      { key: "assessment", label: "Session type", type: "text", required: true, half: true, placeholder: "Deep work" },
-      { key: "score", label: "Duration (min)", type: "number", required: true, half: true, min: 0, step: 5, placeholder: "90" },
-      { key: "maxScore", label: "Target (min)", type: "number", required: true, half: true, min: 1, step: 5, placeholder: "120", defaultValue: 120 },
+      { key: "course", label: "Course", type: "text", required: true, half: true, placeholder: "ML Algorithms" },
+      { key: "assessment", label: "Assessment", type: "text", required: true, half: true, placeholder: "Midterm exam" },
+      // No `max` on either number field: marks scales vary per assessment (20, 50, 100, 150…).
+      { key: "score", label: "Obtained marks", type: "number", required: true, half: true, min: 0, step: 1, placeholder: "e.g. 42" },
+      { key: "maxScore", label: "Maximum marks", type: "number", required: true, half: true, min: 1, step: 1, placeholder: "e.g. 50" },
     ],
   },
   fitness: {

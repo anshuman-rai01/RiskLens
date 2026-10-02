@@ -167,7 +167,7 @@ export function CategoryPage({ category }: { category: Category }) {
     setSubmitting(true);
     try {
       if (editing) {
-        await updateEntry(editing.id, raw, occurredOn, note);
+        await updateEntry(editing.id, category, raw, occurredOn, note);
         toast("Entry updated — previous version archived as a revision.", "ok");
         setEditing(null);
       } else {

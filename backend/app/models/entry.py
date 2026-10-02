@@ -51,6 +51,13 @@ class Entry(Base):
         String(50),
         nullable=True,
     )
+    # Upper bound for scored entries (academic: "Maximum marks"). NULL for
+    # categories where it has no meaning, and for legacy rows created before
+    # this column existed (those were logged on a 0-100 scale).
+    max_value: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+    )
     occurred_at: Mapped[date] = mapped_column(
         Date,
         nullable=False,

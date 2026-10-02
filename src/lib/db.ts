@@ -37,6 +37,7 @@ interface BackendEntry {
   subcategory: string | null;
   value: number | string;
   unit: string | null;
+  max_value?: number | string | null;
   occurred_at: string;
   notes: string | null;
   created_at: string;
@@ -87,6 +88,9 @@ interface BackendProfile {
 
 /* ---------------- mappers ---------------- */
 
+/** Categories whose backend `notes` column holds the user's free-text Note. */
+const FREE_TEXT_NOTE_CATEGORIES = new Set<string>(["savings", "habits"]);
+
 function mapBackendEntryToFrontend(b: BackendEntry): Entry {
   const val = Number(b.value) || 0;
   let data: EntryData;
@@ -121,7 +125,8 @@ function mapBackendEntryToFrontend(b: BackendEntry): Entry {
         course: b.subcategory || "Academics",
         assessment: b.notes || "Assessment",
         score: val,
-        maxScore: 100,
+        // Rows created before max_value existed were logged on a 0-100 scale.
+        maxScore: b.max_value != null ? Number(b.max_value) : 100,
       } as AcademicData;
       break;
     }
@@ -159,7 +164,9 @@ function mapBackendEntryToFrontend(b: BackendEntry): Entry {
     category: b.category as Category,
     data,
     occurredOn: b.occurred_at,
-    note: b.notes || "",
+    // For these categories the notes column stores a structured field (kind, topic,
+    // assessment, intensity), not the free-text Note, so don't echo it back as one.
+    note: FREE_TEXT_NOTE_CATEGORIES.has(b.category) ? b.notes || "" : "",
     createdAt: b.created_at,
     updatedAt: b.updated_at,
     revisions: [],
@@ -202,6 +209,7 @@ function mapFrontendToBackendEntryPayload(
   let subcategory: string | null = null;
   let value = 0;
   let unit: string | null = null;
+  let maxValue: number | null = null;
   let notes = (note || "").trim();
 
   switch (category) {
@@ -228,6 +236,7 @@ function mapFrontendToBackendEntryPayload(
     case "academic": {
       value = Number(raw.score) || 0;
       unit = "score";
+      maxValue = Number(raw.maxScore) || null;
       subcategory = String(raw.course || "Academics");
       notes = String(raw.assessment || note || "");
       break;
@@ -252,6 +261,7 @@ function mapFrontendToBackendEntryPayload(
     subcategory: subcategory ? subcategory.slice(0, 200) : null,
     value,
     unit,
+    max_value: maxValue,
     occurred_at: occurredOn,
     notes: notes ? notes.slice(0, 500) : null,
   };
@@ -317,6 +327,13 @@ export function validateEntryPayload(
         continue;
       }
       clean[f.key] = s;
+    }
+  }
+  if (category === "academic" && !errors.score && !errors.maxScore) {
+    const score = clean.score as number | undefined;
+    const maxScore = clean.maxScore as number | undefined;
+    if (score != null && maxScore != null && score > maxScore) {
+      errors.score = "Obtained marks can't exceed maximum marks.";
     }
   }
   return { errors, data: clean as unknown as EntryData };
@@ -386,12 +403,12 @@ export async function createEntry(
 
 export async function updateEntry(
   id: string,
+  category: Category,
   raw: Record<string, unknown>,
   occurredOn: string,
   note: string,
 ): Promise<Entry> {
-  // Check if updating a goal
-  if (raw.title !== undefined || raw.target !== undefined) {
+  if (category === "goals") {
     const updatePayload: Record<string, unknown> = {};
     if (raw.title !== undefined) updatePayload.title = String(raw.title).trim();
     if (raw.target !== undefined) updatePayload.target = Number(raw.target);
@@ -407,34 +424,15 @@ export async function updateEntry(
     return mapBackendGoalToFrontend(res);
   }
 
-  // Update entry
-  let value = 0;
-  let unit: string | null = null;
-  let notes = (note || "").trim();
-
-  if (raw.amount !== undefined) {
-    value = Number(raw.amount);
-    unit = "INR";
-  } else if (raw.hours !== undefined) {
-    value = Number(raw.hours);
-    unit = "hours";
-  } else if (raw.minutes !== undefined) {
-    value = Number(raw.minutes);
-    unit = "minutes";
-  } else if (raw.score !== undefined) {
-    value = Number(raw.score);
-    unit = "score";
-  } else if (raw.completed !== undefined) {
-    value = (raw.completed === true || raw.completed === "true") ? 1.0 : 0.0;
-    unit = "count";
-  }
-
-  const updateBody = {
-    value,
-    unit,
-    occurred_at: occurredOn,
-    notes: notes || null,
-  };
+  // Build the body with the same mapper createEntry uses, so every field the form
+  // shows (including those stored in subcategory/notes) is written back on edit.
+  // `category` is immutable server-side and the endpoint rejects it, so strip it.
+  const { category: _immutable, ...updateBody } = mapFrontendToBackendEntryPayload(
+    category,
+    raw,
+    occurredOn,
+    note,
+  );
 
   const res = await apiRequest<BackendEntry>(`/entries/${id}`, {
     method: "PUT",

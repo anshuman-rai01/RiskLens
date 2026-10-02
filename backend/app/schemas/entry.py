@@ -70,6 +70,7 @@ class EntryCreate(BaseModel):
     subcategory: Optional[str] = Field(None, max_length=200, description="Category-specific subcategory or label")
     value: Decimal = Field(..., description="Numeric amount, duration, score, or count")
     unit: Optional[str] = Field(None, max_length=50, description="Unit of measurement (e.g. INR, hours, minutes)")
+    max_value: Optional[Decimal] = Field(None, gt=0, description="Maximum attainable value (e.g. maximum marks for an assessment)")
     occurred_at: date = Field(..., description="Date of the entry (YYYY-MM-DD)")
     notes: Optional[str] = Field(None, max_length=500, description="Optional notes or context")
 
@@ -86,6 +87,11 @@ class EntryCreate(BaseModel):
         val = validate_finite_decimal(v)
         assert val is not None
         return val
+
+    @field_validator("max_value")
+    @classmethod
+    def check_max_value(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        return validate_finite_decimal(v)
 
     @field_validator("subcategory", "unit", "notes")
     @classmethod
@@ -106,13 +112,17 @@ class EntryCreate(BaseModel):
 class EntryUpdate(BaseModel):
     """
     Payload for updating an existing entry.
-    Note: 'category' and 'subcategory' are strictly immutable after creation.
-    Attempting to supply them will be rejected with a 422 error due to extra='forbid'.
+    Note: 'category' stays immutable after creation. Supplying it is rejected with a
+    422 error due to extra='forbid'. 'subcategory' IS editable: it carries the
+    user-facing label (description, vault, course, activity, habit), and moving an
+    entry to another series invalidates the old series' cached forecast (see router).
     """
     model_config = ConfigDict(extra="forbid")
 
+    subcategory: Optional[str] = Field(None, max_length=200)
     value: Optional[Decimal] = None
     unit: Optional[str] = Field(None, max_length=50)
+    max_value: Optional[Decimal] = Field(None, gt=0)
     occurred_at: Optional[date] = None
     notes: Optional[str] = Field(None, max_length=500)
 
@@ -126,7 +136,12 @@ class EntryUpdate(BaseModel):
     def check_value(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         return validate_finite_decimal(v)
 
-    @field_validator("unit", "notes")
+    @field_validator("max_value")
+    @classmethod
+    def check_max_value(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        return validate_finite_decimal(v)
+
+    @field_validator("subcategory", "unit", "notes")
     @classmethod
     def trim_strings(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
@@ -142,6 +157,7 @@ class EntryResponse(BaseModel):
     subcategory: Optional[str]
     value: Decimal
     unit: Optional[str]
+    max_value: Optional[Decimal] = None
     occurred_at: date
     notes: Optional[str]
     created_at: datetime

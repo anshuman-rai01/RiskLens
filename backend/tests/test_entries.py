@@ -1,7 +1,7 @@
 """
 Automated tests for Chunk 3 Entries CRUD:
 - User isolation: User B cannot list, retrieve, modify, or delete User A's entries
-- Category and subcategory immutability on update
+- Category immutability on update (subcategory is editable; see test_entry_label_and_max_value_editable)
 - Soft delete: hidden from API, but row persists in DB with deleted_at timestamp
 - Filtering & pagination: category, subcategory, date range (from/to), limit/offset
 - Validations: valid categories, future-date cutoff (> today + 1 day), non-finite numbers
@@ -154,7 +154,7 @@ async def test_entries_full_flow():
         assert len(paged.json()["items"]) == 1
         assert paged.json()["total"] == 3
 
-        # ── Step 4: Category & Subcategory Immutability on Update ────────
+        # ── Step 4: Category Immutability on Update ──────────────────────
         # Attempting to change category must be rejected with 422
         bad_put_cat = await client.put(
             f"/entries/{entry_1['id']}",
@@ -163,13 +163,9 @@ async def test_entries_full_flow():
         )
         assert bad_put_cat.status_code == 422, "Updating category must be rejected"
 
-        # Attempting to change subcategory must be rejected with 422
-        bad_put_sub = await client.put(
-            f"/entries/{entry_1['id']}",
-            json={"subcategory": "salary"},
-            headers=headers_a,
-        )
-        assert bad_put_sub.status_code == 422, "Updating subcategory must be rejected"
+        # Subcategory is the user-facing label and IS editable (covered in
+        # test_entry_label_and_max_value_editable, kept separate so this flow's
+        # later steps can keep relying on entry_1's original subcategory).
 
         # Valid update: update value and notes
         time.sleep(0.01)  # tiny pause to ensure timestamp advances
@@ -303,3 +299,136 @@ async def test_entries_full_flow():
 if __name__ == "__main__":
     asyncio.run(test_entries_full_flow())
     print("All entries tests passed!")
+
+
+@pytest.mark.asyncio
+async def test_entry_label_and_max_value_editable():
+    """
+    Regression for "fields can't be updated on edit":
+    - subcategory (the label: description / vault / course / activity / habit) is editable
+    - notes (structured field for several categories) is editable
+    - max_value (maximum marks) round-trips on create and update, with no upper bound
+    - category is still immutable
+    - editing a label drops the OLD series' cached forecast (otherwise it looks fresh
+      while still containing the moved point)
+    """
+    from app.models.forecast import Forecast  # local import: only this test needs it
+
+    ts = int(time.time() * 1000)
+    password = "SecurePassword123!"
+    today = date.today()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.post("/auth/register", json={"email": f"edit_{ts}@example.com", "password": password})
+        assert res.status_code == 201, res.text
+        headers = {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+        # ── subcategory + notes editable ─────────────────────────────────
+        created = await client.post(
+            "/entries",
+            json={
+                "category": "fitness",
+                "subcategory": "Running",
+                "value": "30",
+                "unit": "minutes",
+                "occurred_at": today.isoformat(),
+                "notes": "moderate",
+            },
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+        entry = created.json()
+        assert entry["max_value"] is None
+
+        edited = await client.put(
+            f"/entries/{entry['id']}",
+            json={"subcategory": "  Yoga  ", "notes": "low"},
+            headers=headers,
+        )
+        assert edited.status_code == 200, edited.text
+        assert edited.json()["subcategory"] == "Yoga"  # trimmed
+        assert edited.json()["notes"] == "low"
+        assert edited.json()["category"] == "fitness"
+
+        # category is still immutable
+        bad = await client.put(f"/entries/{entry['id']}", json={"category": "study"}, headers=headers)
+        assert bad.status_code == 422
+
+        # ── max_value: round-trip, large values allowed, invalid rejected ─
+        acad = await client.post(
+            "/entries",
+            json={
+                "category": "academic",
+                "subcategory": "ML Algorithms",
+                "value": "42",
+                "unit": "score",
+                "max_value": "50",
+                "occurred_at": today.isoformat(),
+                "notes": "Midterm",
+            },
+            headers=headers,
+        )
+        assert acad.status_code == 201, acad.text
+        assert Decimal(str(acad.json()["max_value"])) == Decimal("50")
+
+        bumped = await client.put(
+            f"/entries/{acad.json()['id']}",
+            json={"value": "480", "max_value": "500", "subcategory": "ML Algorithms II", "notes": "Final"},
+            headers=headers,
+        )
+        assert bumped.status_code == 200, bumped.text
+        body = bumped.json()
+        assert Decimal(str(body["max_value"])) == Decimal("500"), "maximum marks must not be capped at 100"
+        assert body["subcategory"] == "ML Algorithms II" and body["notes"] == "Final"
+
+        for bad_max in ("0", "-5"):
+            r = await client.put(f"/entries/{acad.json()['id']}", json={"max_value": bad_max}, headers=headers)
+            assert r.status_code == 422, f"max_value={bad_max} must be rejected"
+
+        # ── moving an entry out of a series drops that series' cached forecast ─
+        user_id = (await client.get("/profile", headers=headers)).json()["user_id"]
+        async with engine.connect() as conn:
+            await conn.execute(
+                Forecast.__table__.insert().values(
+                    id=uuid.uuid4(),
+                    user_id=uuid.UUID(user_id),
+                    category="habits",
+                    subcategory="Meditate",
+                    generated_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+                    horizon_days=14,
+                    forecast_points=[],
+                    data_point_count=3,
+                    reliability="insufficient",
+                )
+            )
+            await conn.commit()
+
+        habit = await client.post(
+            "/entries",
+            json={"category": "habits", "subcategory": "Meditate", "value": "1", "unit": "count",
+                  "occurred_at": today.isoformat()},
+            headers=headers,
+        )
+        assert habit.status_code == 201, habit.text
+
+        async def cached_series() -> list[str | None]:
+            async with engine.connect() as conn:
+                rows = await conn.execute(
+                    select(Forecast.subcategory).where(
+                        Forecast.user_id == uuid.UUID(user_id), Forecast.category == "habits"
+                    )
+                )
+                return [r[0] for r in rows]
+
+        assert await cached_series() == ["Meditate"]
+
+        # Same label re-saved: nothing moves, cache must survive
+        same = await client.put(f"/entries/{habit.json()['id']}", json={"subcategory": "Meditate"}, headers=headers)
+        assert same.status_code == 200
+        assert await cached_series() == ["Meditate"]
+
+        # Renamed: old series cache is dropped
+        moved = await client.put(f"/entries/{habit.json()['id']}", json={"subcategory": "Meditate 10m"}, headers=headers)
+        assert moved.status_code == 200
+        assert await cached_series() == []

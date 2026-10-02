@@ -24,6 +24,7 @@ import type { Entry, GoalData, StudyData } from "../lib/types";
 import { CATEGORIES } from "../lib/categories";
 import { formatINR } from "../lib/currency";
 import type { NavRoute } from "./Sidebar";
+import { SimulationTeaserCard } from "./SimulationLab";
 
 interface DashboardProps {
   onNavigate?: (route: NavRoute) => void;
@@ -714,6 +715,11 @@ export function Dashboard({ onNavigate, startDate, endDate }: DashboardProps) {
           </div>
         </div>
       </div>
+
+      {/* Row 3b: Simulation Lab Teaser */}
+      {onNavigate && (
+        <SimulationTeaserCard onNavigate={onNavigate} />
+      )}
 
       {/* Row 4: Weekly Summary Card (Full Width) */}
       <div className="rounded-xl border border-line bg-card p-4 sm:p-5 shadow-xs">

@@ -4,6 +4,7 @@ import { Sidebar, type NavRoute } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
 import { CategoryPage } from "./components/CategoryPage";
 import { ProfilePage } from "./components/ProfilePage";
+import { SimulationLab } from "./components/SimulationLab";
 import { LogoMark } from "./components/icons";
 import { I } from "./components/icons";
 import { ToastHost } from "./components/ui";
@@ -112,7 +113,9 @@ function Gate() {
         ? "Settings"
         : route.view === "reminders"
           ? "Reminders"
-          : "Overview";
+          : route.view === "simulation"
+            ? "Simulation Lab ✧"
+            : "Overview";
 
   const subtitle =
     route.view === "dashboard"
@@ -121,7 +124,9 @@ function Gate() {
         ? "Manage your profile and preferences"
         : route.view === "reminders"
           ? "Stay on track with timely reminders"
-          : "Your personal analytics";
+          : route.view === "simulation"
+            ? "Run what-if scenarios on your real data"
+            : "Your personal analytics";
 
   return (
     <div className="min-h-screen bg-bg transition-colors duration-200">
@@ -195,6 +200,8 @@ function Gate() {
             <Dashboard onNavigate={setRoute} startDate={startDate} endDate={endDate} />
           ) : route.view === "category" ? (
             <CategoryPage key={route.id} category={route.id} />
+          ) : route.view === "simulation" ? (
+            <SimulationLab onNavigate={setRoute} />
           ) : route.view === "reminders" ? (
             <RemindersView />
           ) : (

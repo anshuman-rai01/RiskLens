@@ -17,7 +17,8 @@ export type NavRoute =
   | { view: "dashboard" }
   | { view: "category"; id: "fitness" | "habits" | "study" | "academic" | "goals" | "income_expense" | "savings" }
   | { view: "profile" }
-  | { view: "reminders" };
+  | { view: "reminders" }
+  | { view: "simulation" };
 
 interface NavItem {
   id: string;
@@ -35,6 +36,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "fitness", label: "Fitness Activities", icon: "activity", route: { view: "category", id: "fitness" } },
   { id: "habits", label: "Habit Tracking", icon: "check", route: { view: "category", id: "habits" } },
   { id: "goals", label: "Personal Goals", icon: "flag", route: { view: "category", id: "goals" } },
+  { id: "simulation", label: "Simulation Lab", icon: "activity", route: { view: "simulation" } },
   { id: "reminders", label: "Reminders", icon: "bell", route: { view: "reminders" } },
   { id: "settings", label: "Settings", icon: "settings", route: { view: "profile" } },
 ];

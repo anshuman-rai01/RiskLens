@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # ── Gemini AI (Chunk 11) ─────────────────────────────────────
+    GEMINI_API_KEY: str = ""        # empty = recommendations degrade to "unavailable"
+    GEMINI_MODEL: str = "gemini-3.6-flash"
+
     # ── Derived helpers ──────────────────────────────────────────
 
     @model_validator(mode="after")

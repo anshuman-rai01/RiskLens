@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from app.models.goal import Goal
     from app.models.profile import Profile
     from app.models.refresh_token import RefreshToken
+    from app.models.simulation import SimulationResult
 
 
 class User(Base):
@@ -77,6 +78,11 @@ class User(Base):
         "Profile",
         back_populates="user",
         uselist=False,
+        cascade="all, delete-orphan",
+    )
+    simulation_results: Mapped[List["SimulationResult"]] = relationship(
+        "SimulationResult",
+        back_populates="user",
         cascade="all, delete-orphan",
     )
 

@@ -214,6 +214,14 @@ const paths: Record<string, React.ReactNode> = {
       <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88" />
     </>
   ),
+  home: (
+    <>
+      <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </>
+  ),
+  "arrow-left": <path d="M19 12H5M12 19l-7-7 7-7" />,
+  "arrow-right": <path d="M5 12h14M12 5l7 7-7 7" />,
 };
 
 interface IconProps extends SVGProps<SVGSVGElement> {

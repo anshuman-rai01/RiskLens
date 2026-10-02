@@ -94,7 +94,7 @@ async def get_alerts(
             Entry.user_id == current_user.id,
             Entry.deleted_at.is_(None),
             Entry.occurred_at >= window_start,
-            Entry.occurred_at <= today_date,
+            Entry.occurred_at <= today_date + timedelta(days=1),
         )
         recent_baseline_entries = list((await db.execute(recent_entries_stmt)).scalars().all())
 

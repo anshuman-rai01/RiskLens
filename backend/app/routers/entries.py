@@ -22,6 +22,7 @@ from app.schemas.entry import (
     EntryListResponse,
     EntryResponse,
     EntryUpdate,
+    format_entry_value,
 )
 
 router = APIRouter(prefix="/entries", tags=["entries"])
@@ -190,6 +191,10 @@ async def update_entry(
 
     for field, value in update_data.items():
         setattr(entry, field, value)
+
+    # Apply category-aware value formatting if value was updated
+    if "value" in update_data and entry.value is not None:
+        entry.value = format_entry_value(entry.category, entry.value)
 
     entry.updated_at = datetime.now(timezone.utc)
     await db.commit()

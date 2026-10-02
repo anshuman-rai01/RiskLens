@@ -10,7 +10,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class EntryCategory(str, Enum):
@@ -48,6 +48,22 @@ def validate_finite_decimal(v: Optional[Decimal]) -> Optional[Decimal]:
     return v
 
 
+def format_entry_value(category: str, value: Decimal) -> Decimal:
+    """
+    Apply category-specific rounding to entry values.
+
+    - income_expense, savings: round to nearest whole integer (monetary amounts)
+    - study, academic: round to 1 decimal place (preserve variation for regression)
+    - fitness, habits: no transformation
+    """
+    cat = category.lower() if isinstance(category, str) else category
+    if cat in ("income_expense", "savings"):
+        return Decimal(str(round(float(value))))
+    elif cat in ("study", "academic"):
+        return value.quantize(Decimal("0.1"))
+    return value
+
+
 class EntryCreate(BaseModel):
     """Payload for creating a new entry."""
     category: EntryCategory
@@ -78,6 +94,13 @@ class EntryCreate(BaseModel):
             v = v.strip()
             return v if v else None
         return None
+
+    @model_validator(mode="after")
+    def apply_category_formatting(self) -> "EntryCreate":
+        """Round value based on category: integers for monetary, 1 decimal for academic."""
+        self.value = format_entry_value(self.category.value, self.value)
+        return self
+
 
 
 class EntryUpdate(BaseModel):

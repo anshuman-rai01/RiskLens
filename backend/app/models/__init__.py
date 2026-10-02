@@ -21,5 +21,6 @@ from app.models.goal import Goal  # noqa: E402, F401
 from app.models.forecast import Forecast  # noqa: E402, F401
 from app.models.alert import Alert  # noqa: E402, F401
 from app.models.profile import Profile  # noqa: E402, F401
+from app.models.simulation import SimulationResult  # noqa: E402, F401
 
 

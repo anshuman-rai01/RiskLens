@@ -1,6 +1,11 @@
 """
 Forecasting service utilizing Prophet for classical statistical time-series forecasting,
 reliability tiering, and graceful edge-case handling.
+
+This is the SINGLE source of truth for Prophet-based forecasting. All simulation
+scenarios call this function — no independent forecasting code exists elsewhere.
+The signature is extended with freq, growth, and threshold parameters so scenarios
+can customize behavior without forking the logic.
 """
 
 from __future__ import annotations
@@ -24,16 +29,30 @@ logging.getLogger("prophet").setLevel(logging.WARNING)
 def compute_forecast(
     entries: List[Entry],
     horizon_days: int = 14,
+    freq: str = "D",
+    growth: str = "linear",
+    min_points_low: int = 14,
+    min_points_reliable: int = 28,
+    include_history: bool = False,
 ) -> Dict[str, Any]:
     """
     Given a list of historical Entry records for a series:
-    1. Aggregates daily values into (ds, y) points.
+    1. Aggregates values by the given frequency into (ds, y) points.
     2. Evaluates reliability tiering:
-       - < 14 points: 'insufficient'
-       - 14-27 points: 'low_confidence'
-       - >= 28 points: 'reliable'
+       - < min_points_low:     'insufficient'
+       - min_points_low to min_points_reliable-1: 'low_confidence'
+       - >= min_points_reliable: 'reliable'
     3. Fits Prophet and predicts `horizon_days` steps into the future.
     4. Handles degenerate series or fitting errors gracefully without raising 500s.
+
+    Parameters:
+        entries: Historical Entry records
+        horizon_days: Number of periods to forecast (days if freq="D", months if freq="MS")
+        freq: Aggregation frequency ("D" for daily, "MS" for month-start, "W" for weekly)
+        growth: Prophet growth mode ("linear" or "flat")
+        min_points_low: Minimum aggregated points for low_confidence tier
+        min_points_reliable: Minimum aggregated points for reliable tier
+        include_history: If True, include historical fitted values in output
     """
     if not entries:
         return {
@@ -43,20 +62,46 @@ def compute_forecast(
             "forecast_points": [],
         }
 
-    # Aggregate by date (sum daily points)
+    # Build raw dataframe
     raw_data = [{"ds": e.occurred_at, "y": float(e.value)} for e in entries]
     df_raw = pd.DataFrame(raw_data)
-    df_daily = (
-        df_raw.groupby("ds", as_index=False)["y"]
-        .sum()
-        .sort_values("ds")
-        .reset_index(drop=True)
-    )
+    df_raw["ds"] = pd.to_datetime(df_raw["ds"])
 
-    n_points = len(df_daily)
+    # Aggregate by frequency
+    if freq == "D":
+        df_agg = (
+            df_raw.groupby("ds", as_index=False)["y"]
+            .sum()
+            .sort_values("ds")
+            .reset_index(drop=True)
+        )
+    elif freq == "MS":
+        # Monthly aggregation: sum values within each calendar month
+        df_raw["month"] = df_raw["ds"].dt.to_period("M").dt.to_timestamp()
+        df_agg = (
+            df_raw.groupby("month", as_index=False)["y"]
+            .sum()
+            .rename(columns={"month": "ds"})
+            .sort_values("ds")
+            .reset_index(drop=True)
+        )
+    elif freq == "W":
+        # Weekly aggregation
+        df_raw["week"] = df_raw["ds"].dt.to_period("W").dt.to_timestamp()
+        df_agg = (
+            df_raw.groupby("week", as_index=False)["y"]
+            .sum()
+            .rename(columns={"week": "ds"})
+            .sort_values("ds")
+            .reset_index(drop=True)
+        )
+    else:
+        raise ValueError(f"Unsupported frequency: {freq}")
 
-    # ── Tier 1: Insufficient Data (< 14 data points) ─────────────────
-    if n_points < 14:
+    n_points = len(df_agg)
+
+    # ── Tier 1: Insufficient Data ─────────────────────────────────
+    if n_points < min_points_low:
         return {
             "reliability": "insufficient",
             "data_point_count": n_points,
@@ -64,34 +109,52 @@ def compute_forecast(
             "forecast_points": [],
         }
 
-    # ── Tier 2 & 3: Low Confidence (14-27) or Reliable (>= 28) ──────
-    reliability = "low_confidence" if n_points < 28 else "reliable"
+    # ── Tier 2 & 3: Low Confidence or Reliable ───────────────────
+    reliability = "low_confidence" if n_points < min_points_reliable else "reliable"
 
     try:
-        # Convert date objects to datetime format expected by Prophet
-        df_daily["ds"] = pd.to_datetime(df_daily["ds"])
-
         # Check for constant/degenerate values
-        is_constant = df_daily["y"].nunique() <= 1
+        is_constant = df_agg["y"].nunique() <= 1
+
+        # Configure seasonality based on frequency and data volume
+        if freq == "D":
+            weekly_seasonality = n_points >= 14
+            yearly_seasonality = False
+            daily_seasonality = False
+        elif freq == "MS":
+            weekly_seasonality = False
+            yearly_seasonality = n_points >= 24
+            daily_seasonality = False
+        else:
+            weekly_seasonality = n_points >= 4
+            yearly_seasonality = False
+            daily_seasonality = False
 
         # Fit Prophet model
         model = Prophet(
+            growth=growth,
             interval_width=0.80,
-            daily_seasonality=False,
-            weekly_seasonality=(n_points >= 14),
-            yearly_seasonality=False,
+            daily_seasonality=daily_seasonality,
+            weekly_seasonality=weekly_seasonality,
+            yearly_seasonality=yearly_seasonality,
         )
-        model.fit(df_daily)
+        model.fit(df_agg)
 
         # Make future dataframe strictly for future horizon
         future = model.make_future_dataframe(
             periods=horizon_days,
-            freq="D",
-            include_history=False,
+            freq=freq,
+            include_history=include_history,
         )
+        if not include_history:
+            # Ensure we only get future points
+            last_date = df_agg["ds"].max()
+            future = future[future["ds"] > last_date]
+
         forecast = model.predict(future)
 
         forecast_points: List[Dict[str, Any]] = []
+        date_format = "%Y-%m-%d" if freq == "D" else "%Y-%m"
         for _, row in forecast.iterrows():
             pred = round(float(row["yhat"]), 2)
             lower = round(float(row["yhat_lower"]), 2)
@@ -105,7 +168,7 @@ def compute_forecast(
 
             forecast_points.append(
                 {
-                    "date": pd.to_datetime(row["ds"]).strftime("%Y-%m-%d"),
+                    "date": pd.to_datetime(row["ds"]).strftime(date_format),
                     "predicted": pred,
                     "lower": lower,
                     "upper": upper,
@@ -128,14 +191,25 @@ def compute_forecast(
     except Exception as exc:
         logger.warning("Prophet fitting failed for series: %s", exc, exc_info=True)
         # Fallback projection without raising 500
-        last_y = float(df_daily["y"].iloc[-1])
-        last_date = pd.to_datetime(df_daily["ds"].iloc[-1])
+        last_y = float(df_agg["y"].iloc[-1])
+        last_date = pd.to_datetime(df_agg["ds"].iloc[-1])
+
+        if freq == "D":
+            delta_fn = lambda i: pd.Timedelta(days=i)
+            date_format = "%Y-%m-%d"
+        elif freq == "MS":
+            delta_fn = lambda i: pd.DateOffset(months=i)
+            date_format = "%Y-%m"
+        else:
+            delta_fn = lambda i: pd.Timedelta(weeks=i)
+            date_format = "%Y-%m-%d"
+
         fallback_points = []
-        for day_offset in range(1, horizon_days + 1):
-            next_date = last_date + pd.Timedelta(days=day_offset)
+        for offset in range(1, horizon_days + 1):
+            next_date = last_date + delta_fn(offset)
             fallback_points.append(
                 {
-                    "date": next_date.strftime("%Y-%m-%d"),
+                    "date": next_date.strftime(date_format),
                     "predicted": round(last_y, 2),
                     "lower": round(last_y * 0.9, 2),
                     "upper": round(last_y * 1.1, 2),
@@ -148,4 +222,3 @@ def compute_forecast(
             "message": "Forecast temporarily unavailable, using trend fallback",
             "forecast_points": fallback_points,
         }
-

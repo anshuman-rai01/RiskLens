@@ -53,7 +53,7 @@ async def test_entries_full_flow():
         payload_1 = {
             "category": "income_expense",
             "subcategory": "freelance",
-            "value": "15000.50",
+            "value": "15000",
             "unit": "INR",
             "occurred_at": today.isoformat(),
             "notes": "Backend milestone payment",
@@ -63,7 +63,7 @@ async def test_entries_full_flow():
         entry_1 = resp_1.json()
         assert entry_1["category"] == "income_expense"
         assert entry_1["subcategory"] == "freelance"
-        assert Decimal(str(entry_1["value"])) == Decimal("15000.50")
+        assert Decimal(str(entry_1["value"])) == Decimal("15000")
         assert entry_1["unit"] == "INR"
         assert entry_1["occurred_at"] == today.isoformat()
         assert entry_1["notes"] == "Backend milestone payment"

@@ -95,3 +95,15 @@ class Entry(Base):
         "User",
         back_populates="entries",
     )
+
+    @property
+    def intensity(self) -> Optional[str]:
+        """Expose intensity for fitness activities stored in notes."""
+        if self.category == "fitness":
+            return self.notes
+        return None
+
+    @intensity.setter
+    def intensity(self, val: Optional[str]) -> None:
+        if val is not None:
+            self.notes = val.strip().lower()

@@ -55,6 +55,15 @@ async def create_entry(
     db: AsyncSession = Depends(get_db),
 ) -> Entry:
     """Create a new time-series entry owned by the authenticated user."""
+    notes = payload.notes
+    if payload.category == EntryCategory.FITNESS:
+        if payload.intensity:
+            notes = payload.intensity.strip().lower()
+        elif not notes:
+            notes = "moderate"
+    elif payload.intensity and not notes:
+        notes = payload.intensity
+
     entry = Entry(
         user_id=current_user.id,
         category=payload.category.value,
@@ -63,7 +72,7 @@ async def create_entry(
         unit=payload.unit,
         max_value=payload.max_value,
         occurred_at=payload.occurred_at,
-        notes=payload.notes,
+        notes=notes,
     )
     db.add(entry)
     await db.commit()

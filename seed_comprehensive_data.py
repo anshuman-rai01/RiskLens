@@ -75,6 +75,16 @@ ACADEMIC_ASSESSMENT_TYPES = [
     "Project Evaluation",
 ]
 
+# Habit Subcategories
+HABIT_SUBCATS = [
+    "Morning Meditation (15m)",
+    "No Sugar",
+    "Reading",
+    "Adhere to 7+ Hours Sleep Schedule",
+    "Deep Work Uninterrupted Block",
+    "Journaling",
+]
+
 
 # ==========================================
 # HELPER FUNCTIONS
@@ -97,6 +107,7 @@ def create_entry(
     unit: str,
     occurred_at: str,
     notes: Optional[str] = None,
+    intensity: Optional[str] = None,
 ) -> bool:
     """Creates a time-series entry via POST /entries on the backend."""
     headers = {"Authorization": f"Bearer {token}"}
@@ -109,6 +120,8 @@ def create_entry(
     }
     if notes:
         payload["notes"] = notes
+    if intensity:
+        payload["intensity"] = intensity
 
     try:
         resp = httpx.post(f"{API_BASE_URL}/entries", json=payload, headers=headers, timeout=15.0)
@@ -325,16 +338,65 @@ def generate_academic_performance(
 def generate_fitness_activities(token: str) -> None:
     print("Seeding Fitness Activities...")
     created = 0
+    # Exactly 10 Low, 10 Moderate, and 10 High distributed randomly across dates
+    intensities = ["Low"] * 10 + ["Moderate"] * 10 + ["High"] * 10
+    random.shuffle(intensities)
+
+    # 5 realistic fitness activities evenly distributed (6 of each across 30 entries)
+    activity_types = ["Running", "Yoga", "Weightlifting", "Cycling", "Swimming"]
+    activities = activity_types * 6
+    random.shuffle(activities)
+
     for i in range(30):
         day_index = random.randint(0, DAYS_OF_HISTORY - 1)
         
         # Multiples of 5 format: 15, 20, 25, 30... 90 minutes
         fitness_duration_mins = random.randint(3, 18) * 5 
+        intensity = intensities[i]
+        activity = activities[i]
         
-        if create_entry(token, "fitness", "workout", fitness_duration_mins, "MINUTES", day_to_date(day_index)):
+        if create_entry(
+            token,
+            "fitness",
+            activity,
+            fitness_duration_mins,
+            "MINUTES",
+            day_to_date(day_index),
+            intensity=intensity,
+        ):
             created += 1
             
     print(f"  Fitness entries: {created}")
+
+# ==========================================
+# 5. HABIT TRACKING (Daily Completions)
+# ==========================================
+
+def generate_habits(token: str) -> None:
+    print("Seeding Habit Activities...")
+    created = 0
+    
+    # Iterate through every day in the 180-day window
+    for day_index in range(DAYS_OF_HISTORY):
+        # Simulate completing between 2 and 5 habits on any given day
+        num_habits_today = random.randint(2, 5)
+        
+        # Randomly select which habits were completed that day
+        completed_habits_today = random.sample(HABIT_SUBCATS, num_habits_today)
+        
+        for habit in completed_habits_today:
+            # Using value=1 and unit="COMPLETION" to signify the habit was done
+            if create_entry(
+                token,
+                "habits",
+                habit,
+                1,
+                "COMPLETION",
+                day_to_date(day_index),
+            ):
+                created += 1
+
+    print(f"  Habit entries: {created} (distributed across matching habits: {', '.join(HABIT_SUBCATS)})")
 
 
 # ==========================================
@@ -365,6 +427,7 @@ def main() -> None:
     weekly_study_hours = generate_study_schedule(token)
     generate_academic_performance(token, weekly_study_hours)
     generate_fitness_activities(token)
+    generate_habits(token)
 
     print("\n[SUCCESS] Comprehensive seeding completed!")
 

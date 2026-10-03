@@ -73,6 +73,7 @@ class EntryCreate(BaseModel):
     max_value: Optional[Decimal] = Field(None, gt=0, description="Maximum attainable value (e.g. maximum marks for an assessment)")
     occurred_at: date = Field(..., description="Date of the entry (YYYY-MM-DD)")
     notes: Optional[str] = Field(None, max_length=500, description="Optional notes or context")
+    intensity: Optional[str] = Field(None, max_length=50, description="Optional intensity level for fitness activities (low, moderate, high)")
 
     @field_validator("occurred_at")
     @classmethod
@@ -93,7 +94,7 @@ class EntryCreate(BaseModel):
     def check_max_value(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         return validate_finite_decimal(v)
 
-    @field_validator("subcategory", "unit", "notes")
+    @field_validator("subcategory", "unit", "notes", "intensity")
     @classmethod
     def trim_strings(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
@@ -125,6 +126,7 @@ class EntryUpdate(BaseModel):
     max_value: Optional[Decimal] = Field(None, gt=0)
     occurred_at: Optional[date] = None
     notes: Optional[str] = Field(None, max_length=500)
+    intensity: Optional[str] = Field(None, max_length=50)
 
     @field_validator("occurred_at")
     @classmethod
@@ -141,7 +143,7 @@ class EntryUpdate(BaseModel):
     def check_max_value(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         return validate_finite_decimal(v)
 
-    @field_validator("subcategory", "unit", "notes")
+    @field_validator("subcategory", "unit", "notes", "intensity")
     @classmethod
     def trim_strings(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
@@ -160,6 +162,7 @@ class EntryResponse(BaseModel):
     max_value: Optional[Decimal] = None
     occurred_at: date
     notes: Optional[str]
+    intensity: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

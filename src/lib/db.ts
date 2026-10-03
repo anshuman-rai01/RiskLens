@@ -132,7 +132,8 @@ function mapBackendEntryToFrontend(b: BackendEntry): Entry {
     }
     case "fitness": {
       const validIntensities = ["low", "moderate", "high"] as const;
-      const intensity = validIntensities.includes(b.notes as any) ? (b.notes as "low" | "moderate" | "high") : "moderate";
+      const rawIntensity = String((b as any).intensity || b.notes || "").toLowerCase().trim();
+      const intensity = validIntensities.includes(rawIntensity as any) ? (rawIntensity as "low" | "moderate" | "high") : "moderate";
       data = {
         activity: b.subcategory || "Workout",
         minutes: Math.round(val),

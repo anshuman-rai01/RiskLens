@@ -4,11 +4,11 @@ Pydantic schemas for simulation requests, responses, and debug output.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ScenarioType(str, Enum):
@@ -33,6 +33,7 @@ class SimulationPoint(BaseModel):
     """A single data point in a simulation line."""
     date: str = Field(description="Date string (YYYY-MM-DD or YYYY-MM)")
     value: float = Field(description="Projected value at this date")
+    x: Optional[float] = Field(default=None, description="Numeric x-axis value (months, days, hours, years)")
 
 
 class SimulationLine(BaseModel):
@@ -108,19 +109,53 @@ class SimulationDebugResponse(BaseModel):
 
 class BuyVsRentParams(BaseModel):
     """Validated input parameters for Buy vs Rent scenario."""
+    # Purchase
     home_price: float = Field(..., gt=0, description="Total home purchase price")
-    mortgage_rate_pct: float = Field(..., gt=0, description="Annual mortgage interest rate (%)")
-    loan_term_years: int = Field(..., gt=0, description="Mortgage loan term in years")
-    current_monthly_rent: float = Field(..., gt=0, description="Current monthly rent amount")
-    expected_rent_increase_pct_per_year: float = Field(
-        ..., gt=0, description="Expected annual rent increase (%)",
-    )
+    down_payment_pct: float = Field(20.0, ge=0, le=100.0, description="Down payment percentage (0-100)")
     expected_home_appreciation_pct_per_year: float = Field(
-        ..., gt=0, description="Expected annual home value appreciation (%)",
+        ..., ge=-10.0, le=30.0, description="Expected annual home appreciation (%)"
     )
+    maintenance_pct_per_year: float = Field(1.0, ge=0, le=20.0, description="Annual maintenance (% of home price)")
+    property_tax_pct_per_year: float = Field(1.0, ge=0, le=20.0, description="Annual property tax (% of home price)")
+    selling_costs_pct: float = Field(6.0, ge=0, le=30.0, description="Selling costs upon exit (% of home value)")
+
+    # Mortgage
+    mortgage_rate_pct: float = Field(..., ge=0, le=30.0, description="Annual mortgage interest rate (%)")
+    loan_term_years: int = Field(..., ge=1, le=40, description="Mortgage loan term in years (1-40)")
+    closing_costs_pct: float = Field(3.0, ge=0, le=20.0, description="Closing costs paid at purchase (% of home price)")
+
+    # Rental
+    current_monthly_rent: float = Field(..., gt=0, description="Initial monthly rent amount")
+    expected_rent_increase_pct_per_year: float = Field(
+        ..., ge=0, le=30.0, description="Expected annual rent increase (%)"
+    )
+    security_deposit_months: float = Field(2.0, ge=0, le=24.0, description="Security deposit in months of rent (refundable)")
+
+    # Investment & Tax
     expected_investment_return_pct_per_year: float = Field(
-        ..., gt=0, description="Expected annual investment return (%) for rent path",
+        ..., ge=0, le=40.0, description="Expected annual investment return (%)"
     )
+    inflation_pct_per_year: float = Field(5.0, ge=-5.0, le=30.0, description="Annual inflation rate (%)")
+    output_basis: str = Field("nominal", description="Output basis: 'nominal' or 'real'")
+    portfolio_gains_tax_pct: float = Field(0.0, ge=0, le=60.0, description="Tax on investment portfolio gains (%)")
+    property_gains_tax_pct: float = Field(0.0, ge=0, le=60.0, description="Tax on property appreciation gains (%)")
+
+    # Horizon
+    horizon_years: Optional[int] = Field(None, ge=1, le=40, description="Projection horizon in years (1-40)")
+
+    @model_validator(mode="after")
+    def validate_deposit_and_horizon(self) -> "BuyVsRentParams":
+        if self.horizon_years is None:
+            self.horizon_years = self.loan_term_years
+
+        k = (self.down_payment_pct / 100.0 * self.home_price) + (self.closing_costs_pct / 100.0 * self.home_price)
+        d0 = self.security_deposit_months * self.current_monthly_rent
+        if d0 > k:
+            raise ValueError(f"Security deposit ({d0:,.2f}) exceeds initial required capital ({k:,.2f})")
+
+        if self.output_basis not in ("nominal", "real"):
+            raise ValueError("output_basis must be 'nominal' or 'real'")
+        return self
 
 
 class ProgramOutcomeParams(BaseModel):
@@ -136,3 +171,59 @@ class ProgramOutcomeParams(BaseModel):
     opportunity_cost_income_during_program: float = Field(
         ..., ge=0, description="Annual income forgone during program (can be 0 if studying part-time)",
     )
+
+
+class IncreaseSavingsRateParams(BaseModel):
+    """Validated input parameters for Increase Savings Rate scenario."""
+    target_rate: float = Field(..., gt=0, le=1.0, description="Target savings rate as a fraction (0 < x <= 1)")
+    horizon_months: int = Field(60, ge=1, le=120, description="Projection horizon in months (1-120)")
+    window_start: Optional[str] = Field(None, description="Window start ISO date (YYYY-MM-DD)")
+    window_end: Optional[str] = Field(None, description="Window end ISO date (YYYY-MM-DD)")
+
+    @field_validator("window_start", "window_end")
+    @classmethod
+    def validate_date_format(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            try:
+                date.fromisoformat(v)
+            except ValueError:
+                raise ValueError("Must be a valid ISO date (YYYY-MM-DD)")
+        return v
+
+    @model_validator(mode="after")
+    def validate_window(self) -> "IncreaseSavingsRateParams":
+        if self.window_start and self.window_end:
+            d_start = date.fromisoformat(self.window_start)
+            d_end = date.fromisoformat(self.window_end)
+            if d_start >= d_end:
+                raise ValueError("window_start must be strictly before window_end")
+            if d_end > date.today():
+                raise ValueError("window_end cannot be in the future")
+        elif (self.window_start and not self.window_end) or (self.window_end and not self.window_start):
+            raise ValueError("Both window_start and window_end must be provided together")
+        return self
+
+
+class FitnessPlanParams(BaseModel):
+    """Validated input parameters for Fitness Plan scenario."""
+    target_weekly_minutes: float = Field(..., gt=0, description="Target weekly workout minutes (> 0)")
+    horizon_days: int = Field(90, ge=7, le=365, description="Projection horizon in days (7-365)")
+    history_days: Optional[int] = Field(None, ge=14, le=365, description="History window in days (14-365, or None for all-time)")
+
+
+class StudyHoursParams(BaseModel):
+    """Validated input parameters for Study Hours What-If scenario."""
+    window_days: int = Field(14, description="Study aggregation window in days (7 or 14)")
+    subject: Optional[str] = Field(None, description="Optional academic course / study subject filter")
+    assessment_type: Optional[str] = Field(None, description="Optional assessment type filter")
+    current_daily_hours: Optional[float] = Field(None, ge=0.0, le=8.0, description="Baseline daily study hours (0-8)")
+    simulated_daily_hours: Optional[float] = Field(None, ge=0.0, le=8.0, description="Simulated daily study hours (0-8)")
+
+    @field_validator("window_days")
+    @classmethod
+    def validate_window_days(cls, v: int) -> int:
+        if v not in (7, 14):
+            raise ValueError("window_days must be 7 or 14")
+        return v
+
+

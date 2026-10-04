@@ -24,13 +24,14 @@ from app.models.entry import Entry
 
 class DataDrivenScenario(ABC):
     """
-    Scenarios whose Best/Expected/Risk projections come from Prophet's
-    statistical confidence interval over the user's real historical entries.
+    Scenarios whose projections are driven by the user's real historical entries.
 
-    Every implementation MUST call the shared compute_forecast() function
-    from app.services.forecasting — no independent forecasting/statistical
-    code. A simulation is a forecast with one input parametrically varied,
-    compared against the unaltered forecast.
+    Note: Historically, all DataDrivenScenarios were designed to call Prophet's
+    compute_forecast(). However, Scenario 1 (IncreaseSavingsRate) and Scenario 2
+    (FitnessPlan) deliberately deviate from Prophet because their product specifications
+    mandate deterministic mathematical formulas (cumulative wealth projections from
+    current savings rate and square-root-of-time variability bands) rather than Prophet's
+    generalized additive time-series models.
     """
 
     # Default staleness scope: invalidate when *any* entry changes

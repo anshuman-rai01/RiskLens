@@ -70,8 +70,60 @@ async def get_forecast(
     )
     cached_forecast = (await db.execute(forecast_stmt)).scalar_one_or_none()
 
-    # 2. Check if cache is fresh (matching horizon and no newer/modified entries)
-    if cached_forecast is not None and cached_forecast.horizon_days == horizon_days:
+    # 2. Universal Threshold Enforcement: Query actual active database records
+    entries_stmt = (
+        select(Entry)
+        .where(
+            *entry_filters,
+            Entry.deleted_at.is_(None),
+        )
+        .order_by(Entry.occurred_at.asc())
+    )
+    entries = list((await db.execute(entries_stmt)).scalars().all())
+    actual_records_count = len(entries)
+
+    # Enforce strict dynamic threshold: len(actual_db_records) < 14 is universally insufficient
+    if actual_records_count < 14:
+        logger.info(
+            "Insufficient data for user=%s, series=(%s, %s): %d records (requires >= 14)",
+            current_user.id,
+            category,
+            sub_val,
+            actual_records_count,
+        )
+        now_utc = datetime.now(timezone.utc)
+        if cached_forecast is not None:
+            cached_forecast.generated_at = now_utc
+            cached_forecast.horizon_days = horizon_days
+            cached_forecast.forecast_points = []
+            cached_forecast.data_point_count = actual_records_count
+            cached_forecast.reliability = "insufficient"
+            cached_forecast.message = "More data is required to generate a forecast"
+        else:
+            cached_forecast = Forecast(
+                user_id=current_user.id,
+                category=category,
+                subcategory=sub_val,
+                generated_at=now_utc,
+                horizon_days=horizon_days,
+                forecast_points=[],
+                data_point_count=actual_records_count,
+                reliability="insufficient",
+                message="More data is required to generate a forecast",
+            )
+            db.add(cached_forecast)
+
+        await db.commit()
+        await db.refresh(cached_forecast)
+        return ForecastResponse.model_validate(cached_forecast)
+
+    # 3. Check if cached forecast is fresh (matching horizon, record count, and no newer modifications)
+    if (
+        cached_forecast is not None
+        and cached_forecast.horizon_days == horizon_days
+        and cached_forecast.data_point_count == actual_records_count
+        and cached_forecast.reliability != "insufficient"
+    ):
         stale_check = select(func.count()).select_from(Entry).where(
             *entry_filters,
             (
@@ -92,24 +144,13 @@ async def get_forecast(
             )
             return ForecastResponse.model_validate(cached_forecast)
 
-
-    # 3. Cache MISS or STALE: Query history points and recompute
+    # 4. Cache MISS or STALE: Recompute forecast with actual records using Prophet
     logger.info(
         "Cache MISS: Recomputing forecast for user=%s, series=(%s, %s)",
         current_user.id,
         category,
         sub_val,
     )
-    entries_stmt = (
-        select(Entry)
-        .where(
-            *entry_filters,
-            Entry.deleted_at.is_(None),
-        )
-        .order_by(Entry.occurred_at.asc())
-    )
-    entries = list((await db.execute(entries_stmt)).scalars().all())
-
     result = compute_forecast(entries, horizon_days=horizon_days)
     now_utc = datetime.now(timezone.utc)
 

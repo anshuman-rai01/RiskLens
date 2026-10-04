@@ -22,20 +22,59 @@ export class ApiError extends Error {
   status: number;
   code: string;
   field?: string;
+  detail?: unknown;
 
-  constructor(statusOrCode: number | string, message: string, codeOrField?: string, maybeField?: string) {
+  constructor(
+    statusOrCode: number | string,
+    message: string,
+    codeOrField?: string,
+    maybeField?: string,
+    detail?: unknown
+  ) {
     super(message);
     this.name = "ApiError";
     if (typeof statusOrCode === "number") {
       this.status = statusOrCode;
       this.code = codeOrField || `HTTP_${statusOrCode}`;
       this.field = maybeField;
+      this.detail = detail;
     } else {
       this.status = 400;
       this.code = statusOrCode;
       this.field = codeOrField;
+      this.detail = detail;
     }
   }
+}
+
+/**
+ * Maps FastAPI detail arrays (both {field, message} and {loc, msg}) to a Record<field, message>.
+ */
+export function extractFieldErrors(detail: unknown): Record<string, string> {
+  const errors: Record<string, string> = {};
+  if (!detail) return errors;
+
+  if (Array.isArray(detail)) {
+    for (const item of detail) {
+      if (item && typeof item === "object") {
+        const d = item as { field?: string; message?: string; loc?: Array<string | number>; msg?: string };
+        if (d.field) {
+          errors[d.field] = d.message || "Invalid value";
+        } else if (d.loc && Array.isArray(d.loc) && d.loc.length > 0) {
+          const fieldName = String(d.loc[d.loc.length - 1]);
+          errors[fieldName] = d.msg || "Invalid value";
+        }
+      }
+    }
+  } else if (typeof detail === "object") {
+    for (const [k, v] of Object.entries(detail as Record<string, unknown>)) {
+      if (typeof v === "string") {
+        errors[k] = v;
+      }
+    }
+  }
+
+  return errors;
 }
 
 export function onAuthRevoked(listener: () => void): () => void {
@@ -153,6 +192,9 @@ export async function apiRequest<T = unknown>(
   try {
     response = await fetch(url, { ...options, headers });
   } catch (netErr) {
+    if (netErr instanceof Error && netErr.name === "AbortError") {
+      throw netErr;
+    }
     throw new ApiError(
       0,
       netErr instanceof Error ? netErr.message : "Network error: unable to connect to server.",
@@ -216,16 +258,23 @@ async function handleResponse<T>(response: Response): Promise<T> {
       } else if (Array.isArray(payload.detail) && payload.detail.length > 0) {
         // FastAPI validation error format
         const firstErr = payload.detail[0];
-        message = firstErr.msg || "Validation error";
-        if (Array.isArray(firstErr.loc) && firstErr.loc.length > 1) {
-          field = String(firstErr.loc[firstErr.loc.length - 1]);
+        if (firstErr.message) {
+          message = firstErr.message;
+          field = firstErr.field;
+        } else if (firstErr.msg) {
+          message = firstErr.msg;
+          if (Array.isArray(firstErr.loc) && firstErr.loc.length > 0) {
+            field = String(firstErr.loc[firstErr.loc.length - 1]);
+          }
+        } else {
+          message = "Validation error";
         }
       } else if (payload.message) {
         message = payload.message;
       }
     }
 
-    throw new ApiError(response.status, message, `HTTP_${response.status}`, field);
+    throw new ApiError(response.status, message, `HTTP_${response.status}`, field, payload?.detail);
   }
 
   return payload as T;

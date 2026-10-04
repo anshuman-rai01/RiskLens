@@ -34,6 +34,8 @@ from app.models.simulation import SimulationResult
 from app.models.user import User
 from app.schemas.simulation import (
     BuyVsRentParams,
+    FitnessPlanParams,
+    IncreaseSavingsRateParams,
     ProgramOutcomeParams,
     ScenarioType,
     SimulationDebugResponse,
@@ -41,6 +43,7 @@ from app.schemas.simulation import (
     SimulationPoint,
     SimulationRequest,
     SimulationResponse,
+    StudyHoursParams,
 )
 from app.services.scenarios import (
     SCENARIO_REGISTRY,
@@ -55,6 +58,9 @@ router = APIRouter(prefix="/simulations", tags=["simulations"])
 
 # Map scenario types to their param validation schemas
 PARAM_VALIDATORS = {
+    "increase_savings_rate": IncreaseSavingsRateParams,
+    "fitness_plan": FitnessPlanParams,
+    "reduce_study_hours": StudyHoursParams,
     "buy_vs_rent": BuyVsRentParams,
     "program_outcome": ProgramOutcomeParams,
 }

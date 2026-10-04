@@ -250,6 +250,23 @@ export function Dashboard({ onNavigate, startDate, endDate }: DashboardProps) {
     },
   ];
 
+  // Universal threshold enforcement: actual database count in current forecast category
+  const categoryDbRecords = entries.filter((e) => e.category === forecastCategory);
+  const actualDbCount = !loading ? categoryDbRecords.length : (forecast?.data_point_count ?? 0);
+
+  // Strict dynamic threshold check: < 14 records is universally insufficient
+  const isForecastInsufficient =
+    !forecast ||
+    forecast.reliability === "insufficient" ||
+    (forecast.data_point_count ?? 0) < 14 ||
+    (!loading && actualDbCount < 14) ||
+    !forecast.forecast_points ||
+    forecast.forecast_points.length === 0;
+
+  const displayDataPointCount = !loading && actualDbCount === 0
+    ? 0
+    : Math.min(forecast?.data_point_count ?? actualDbCount, actualDbCount);
+
   return (
     <div className="space-y-4 sm:space-y-5">
       {/* Row 1: KPI Metrics Row */}
@@ -290,16 +307,16 @@ export function Dashboard({ onNavigate, startDate, endDate }: DashboardProps) {
                 {forecast && (
                   <span
                     className={`text-[9.5px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                      forecast.reliability === "reliable"
+                      !isForecastInsufficient && forecast.reliability === "reliable"
                         ? "bg-ok-soft text-ok border border-ok/20"
-                        : forecast.reliability === "low_confidence"
+                        : !isForecastInsufficient && forecast.reliability === "low_confidence"
                           ? "bg-warn-soft text-warn border border-warn/20"
                           : "bg-bg-soft text-ink-faint border border-line"
                     }`}
                   >
-                    {forecast.reliability === "reliable"
+                    {!isForecastInsufficient && forecast.reliability === "reliable"
                       ? "Reliable (28+ pts)"
-                      : forecast.reliability === "low_confidence"
+                      : !isForecastInsufficient && forecast.reliability === "low_confidence"
                         ? "Low Confidence (14-27 pts)"
                         : "Insufficient (<14 pts)"}
                   </span>
@@ -324,7 +341,7 @@ export function Dashboard({ onNavigate, startDate, endDate }: DashboardProps) {
                 <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mb-2" />
                 <p className="text-[12px]">Computing time-series forecast…</p>
               </div>
-            ) : !forecast || forecast.reliability === "insufficient" ? (
+            ) : isForecastInsufficient ? (
               /* Insufficient Data Tier: Explanatory State */
               <div className="h-[180px] flex flex-col justify-center rounded-lg bg-bg-soft/60 border border-dashed border-line p-4 text-center">
                 <div className="w-8 h-8 rounded-full bg-warn-soft text-warn flex items-center justify-center mx-auto mb-2">
@@ -336,7 +353,7 @@ export function Dashboard({ onNavigate, startDate, endDate }: DashboardProps) {
                 <p className="text-[11px] text-ink-soft leading-relaxed max-w-[280px] mx-auto mb-2.5">
                   Predictive modeling requires 14+ daily data points. Currently{" "}
                   <span className="font-semibold text-ink font-mono">
-                    {forecast?.data_point_count ?? 0}
+                    {displayDataPointCount}
                   </span>{" "}
                   recorded in this category.
                 </p>
@@ -344,7 +361,7 @@ export function Dashboard({ onNavigate, startDate, endDate }: DashboardProps) {
                   <div
                     className="bg-primary h-full rounded-full transition-all duration-300"
                     style={{
-                      width: `${Math.min(100, (((forecast?.data_point_count ?? 0) / 14) * 100))}%`,
+                      width: `${Math.min(100, ((displayDataPointCount / 14) * 100))}%`,
                     }}
                   />
                 </div>

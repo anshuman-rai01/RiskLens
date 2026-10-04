@@ -1,41 +1,44 @@
 """
-Increase Savings Rate scenario — data-driven simulation.
+Increase Savings Rate scenario — deterministic cumulative wealth projection.
 
-Computes a savings rate from real historical data and projects it forward
-using the shared Prophet forecasting function with growth="flat".
-
-Income identification: uses notes field tagging convention (notes == "income").
-Untagged entries are excluded from both sides of the calculation.
+Computes a dynamic cumulative projection starting at the user's real savings to date,
+with current-rate and target-rate trajectories updating live.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.models.entry import Entry
-from app.services.forecasting import compute_forecast
 from app.services.scenarios import DataDrivenScenario
 
 logger = logging.getLogger(__name__)
 
-# Trailing window for current rate computation
-TRAILING_MONTHS = 6
-MIN_INCOME_EVENTS = 3  # Floor guard: minimum income-tagged entries in window
+DAYS_PER_MONTH = 30.4375
 
 
 class IncreaseSavingsRate(DataDrivenScenario):
     """
     Scenario: What if I increase my savings rate to X%?
 
-    - Current rate: derived from real savings entries ÷ income-tagged income_expense entries
-    - Trailing window: 6 months (falls back to all-time if <3 income events in window)
-    - Prophet: growth="flat", freq="MS" (monthly), horizon=60 months (5 years)
-    - Chart: exactly 2 lines (current_path_expected, expected_case)
-    - best_case and risk_case: explicitly empty
-    - Reliability: monthly thresholds (3+ months = low_confidence, 6+ = reliable)
+    - base_savings: sum of all non-deleted savings entries to date.
+    - Analysis window: user-selected or auto-derived [first_income_date, today].
+    - months_in_window = (window_end - window_start + 1 days) / 30.4375.
+    - avg_monthly_income = income in window / months_in_window.
+    - current_rate = savings in window / income in window.
+    - Lines:
+        current_path_expected = base + current_rate * avg_monthly_income * N
+        expected_case = base + target_rate * avg_monthly_income * N
+      for N = 0..horizon_months with x = N.
+    - Tiers based on distinct calendar months with income in window:
+        < 3: insufficient
+        3-5: low_confidence
+        >= 6: reliable
     """
+
+    staleness_scope: Optional[str] = "all"
 
     def compute(
         self,
@@ -44,105 +47,125 @@ class IncreaseSavingsRate(DataDrivenScenario):
         params: Dict[str, Any],
     ) -> Dict[str, Any]:
         target_rate = float(params.get("target_rate", 0.20))
+        horizon_months = int(params.get("horizon_months", 60))
 
-        # Separate entries by category
-        savings_entries = [e for e in entries if e.category == "savings"]
+        # ── 1. Base savings: sum of ALL non-deleted savings to date ───────────
+        base_savings = sum(
+            float(e.value) for e in entries if e.category == "savings"
+        )
+
+        # ── 2. Filter income-tagged entries (case-insensitive notes check) ─────
         income_entries = [
             e for e in entries
             if e.category == "income_expense"
             and (e.notes or "").strip().lower() == "income"
         ]
 
-        if not income_entries:
-            return {
-                "lines": [],
-                "reliability": "insufficient",
-                "data_point_count": 0,
-                "message": "No income-tagged entries found. Tag income_expense entries with notes='income' to enable this scenario.",
-                "derived_values": {"current_rate": None, "target_rate": target_rate},
-                "correlation_r_squared": None,
-            }
+        today = date.today()
 
-        # ── Compute current savings rate ──────────────────────────────
-        cutoff_date = date.today() - timedelta(days=TRAILING_MONTHS * 30)
+        # ── 3. Resolve analysis window ───────────────────────────────────────
+        window_start_param = params.get("window_start")
+        window_end_param = params.get("window_end")
 
-        # Filter to trailing window
-        window_income = [e for e in income_entries if e.occurred_at >= cutoff_date]
-        window_savings = [e for e in savings_entries if e.occurred_at >= cutoff_date]
+        if window_start_param and window_end_param:
+            window_start = date.fromisoformat(str(window_start_param))
+            window_end = date.fromisoformat(str(window_end_param))
+        else:
+            if income_entries:
+                window_start = min(e.occurred_at for e in income_entries)
+            else:
+                window_start = today
+            window_end = today
 
-        # Floor-of-3 guard: if fewer than 3 income-tagged entries in window,
-        # fall back to all-time history to dampen lumpiness
-        if len(window_income) < MIN_INCOME_EVENTS:
-            logger.info(
-                "Savings rate: only %d income events in %d-month window, "
-                "falling back to all-time history for user=%s",
-                len(window_income), TRAILING_MONTHS, user_id,
-            )
-            window_income = income_entries
-            window_savings = savings_entries
+        days_in_window = (window_end - window_start).days + 1
+        months_in_window = days_in_window / DAYS_PER_MONTH
 
-        total_income = sum(float(e.value) for e in window_income)
-        total_savings = sum(float(e.value) for e in window_savings)
+        # Filter entries within analysis window
+        income_in_window = [
+            e for e in income_entries
+            if window_start <= e.occurred_at <= window_end
+        ]
+        savings_in_window = [
+            e for e in entries
+            if e.category == "savings"
+            and window_start <= e.occurred_at <= window_end
+        ]
 
-        if total_income <= 0:
-            return {
-                "lines": [],
-                "reliability": "insufficient",
-                "data_point_count": len(window_income),
-                "message": "Total income in the analysis window is zero or negative.",
-                "derived_values": {"current_rate": 0.0, "target_rate": target_rate},
-                "correlation_r_squared": None,
-            }
+        total_income_in_window = sum(float(e.value) for e in income_in_window)
+        total_savings_in_window = sum(float(e.value) for e in savings_in_window)
 
-        current_rate = total_savings / total_income
-
-        # ── Prophet forecast on income series ─────────────────────────
-        # growth="flat" prevents nonsensical long-range trend extrapolation
-        # freq="MS" for monthly aggregation, horizon=60 (5 years)
-        forecast_result = compute_forecast(
-            entries=income_entries,
-            horizon_days=60,  # 60 months
-            freq="MS",
-            growth="flat",
-            min_points_low=3,
-            min_points_reliable=6,
+        avg_monthly_income = (
+            total_income_in_window / months_in_window if months_in_window > 0 else 0.0
         )
 
-        reliability = forecast_result["reliability"]
-        data_point_count = forecast_result["data_point_count"]
+        if total_income_in_window > 0:
+            current_rate = total_savings_in_window / total_income_in_window
+        else:
+            current_rate = 0.0
 
-        if reliability == "insufficient":
+        # Warning message if savings exceed income
+        message: Optional[str] = None
+        if current_rate > 1.0:
+            message = (
+                "Tracked savings exceed income in this window (savings rate > 100%). "
+                "Please verify your income and savings tagging."
+            )
+
+        # ── 4. Reliability Tiers: distinct calendar months with income ────────
+        distinct_months = set(
+            (e.occurred_at.year, e.occurred_at.month) for e in income_in_window
+        )
+        data_point_count = len(distinct_months)
+
+        if data_point_count < 3 or total_income_in_window <= 0:
+            reliability = "insufficient"
+            if not message:
+                message = (
+                    "Insufficient data: fewer than 3 distinct months with income "
+                    "in the analysis window."
+                )
             return {
                 "lines": [],
-                "reliability": "insufficient",
+                "reliability": reliability,
                 "data_point_count": data_point_count,
-                "message": forecast_result.get("message", "Insufficient data for savings rate projection"),
-                "derived_values": {"current_rate": round(current_rate, 4), "target_rate": target_rate},
+                "message": message,
+                "derived_values": {
+                    "base_savings": round(base_savings, 2),
+                    "avg_monthly_income": round(avg_monthly_income, 2),
+                    "months_in_window": round(months_in_window, 2),
+                    "current_rate": round(current_rate, 4),
+                    "target_rate": round(target_rate, 4),
+                    "window_start": window_start.isoformat(),
+                    "window_end": window_end.isoformat(),
+                    "horizon_months": horizon_months,
+                    "total_income_in_window": round(total_income_in_window, 2),
+                    "total_savings_in_window": round(total_savings_in_window, 2),
+                },
                 "correlation_r_squared": None,
             }
+        elif data_point_count <= 5:
+            reliability = "low_confidence"
+        else:
+            reliability = "reliable"
 
-        # ── Build chart lines (cumulative running total) ──────────────
-        # Line 1: current_path_expected — cumulative savings at current rate
-        # Line 2: expected_case — cumulative savings at target rate
-        # Both start from 0.0 to cleanly show new projected accumulation going forward.
+        # ── 5. Build cumulative projection lines for N = 0..horizon_months ────
         current_path_points = []
         expected_case_points = []
-        current_running_total = 0.0
-        expected_running_total = 0.0
 
-        for fp in forecast_result["forecast_points"]:
-            projected_income = fp["predicted"]
-
-            current_running_total += projected_income * current_rate
-            expected_running_total += projected_income * target_rate
+        for n in range(horizon_months + 1):
+            pt_date = (today + timedelta(days=int(n * DAYS_PER_MONTH))).strftime("%Y-%m")
+            current_val = base_savings + current_rate * avg_monthly_income * n
+            expected_val = base_savings + target_rate * avg_monthly_income * n
 
             current_path_points.append({
-                "date": fp["date"],
-                "value": round(current_running_total, 2),
+                "x": float(n),
+                "date": pt_date,
+                "value": round(current_val, 2),
             })
             expected_case_points.append({
-                "date": fp["date"],
-                "value": round(expected_running_total, 2),
+                "x": float(n),
+                "date": pt_date,
+                "value": round(expected_val, 2),
             })
 
         lines = [
@@ -154,13 +177,18 @@ class IncreaseSavingsRate(DataDrivenScenario):
             "lines": lines,
             "reliability": reliability,
             "data_point_count": data_point_count,
-            "message": None,
+            "message": message,
             "derived_values": {
+                "base_savings": round(base_savings, 2),
+                "avg_monthly_income": round(avg_monthly_income, 2),
+                "months_in_window": round(months_in_window, 2),
                 "current_rate": round(current_rate, 4),
-                "target_rate": target_rate,
-                "total_income_in_window": round(total_income, 2),
-                "total_savings_in_window": round(total_savings, 2),
-                "income_events_in_window": len(window_income),
+                "target_rate": round(target_rate, 4),
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+                "horizon_months": horizon_months,
+                "total_income_in_window": round(total_income_in_window, 2),
+                "total_savings_in_window": round(total_savings_in_window, 2),
             },
             "correlation_r_squared": None,
         }

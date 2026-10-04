@@ -263,6 +263,13 @@ async def delete_entry(
         )
 
     entry.deleted_at = datetime.now(timezone.utc)
+    # Invalidate cached forecasts for this user and category
+    await db.execute(
+        delete(Forecast).where(
+            Forecast.user_id == current_user.id,
+            Forecast.category == entry.category,
+        )
+    )
     await db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)

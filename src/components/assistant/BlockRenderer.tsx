@@ -3,6 +3,7 @@ import { Block } from "../../lib/assistantTypes";
 import { MetricsBlock } from "./MetricsBlock";
 import { ChartBlock } from "./ChartBlock";
 import { NoticeBlock } from "./NoticeBlock";
+import { TableBlock } from "./TableBlock";
 
 interface BlockRendererProps {
   block: Block;
@@ -16,6 +17,7 @@ const BLOCK_REGISTRY: Record<string, React.ComponentType<{ block: any }>> = {
   metrics: MetricsBlock,
   chart: ChartBlock,
   notice: NoticeBlock,
+  table: TableBlock,
 };
 
 export const BlockRenderer: React.FC<BlockRendererProps> = ({ block }) => {

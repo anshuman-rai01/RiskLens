@@ -12,9 +12,13 @@ from app.schemas.assistant import (
     ChartBand,
     ChartBlock,
     ChartSeries,
+    ConfirmDeleteBlock,
+    ConfirmEntryBlock,
     MetricItem,
     MetricsBlock,
     NoticeBlock,
+    TableBlock,
+    TableColumn,
 )
 
 
@@ -73,4 +77,55 @@ def build_notice_block(
         id=block_id or make_block_id("notice"),
         tone=tone,
         text=text,
+    )
+
+
+def build_table_block(
+    title: str,
+    columns: List[TableColumn],
+    rows: List[Dict[str, Any]],
+    total_count: Optional[int] = None,
+    block_id: Optional[str] = None,
+) -> TableBlock:
+    """Construct a validated TableBlock with up to 8 columns and 50 rows."""
+    return TableBlock(
+        id=block_id or make_block_id("table"),
+        title=title,
+        columns=columns[:8],
+        rows=rows[:50],
+        total_count=total_count,
+    )
+
+
+def build_confirm_entry_block(
+    category: str,
+    payload: Dict[str, Any],
+    preview: Dict[str, Any],
+    summary: str,
+    block_id: Optional[str] = None,
+) -> ConfirmEntryBlock:
+    """Construct a validated ConfirmEntryBlock for user write confirmation."""
+    return ConfirmEntryBlock(
+        id=block_id or make_block_id("confirm_entry"),
+        category=category,
+        payload=payload,
+        preview=preview,
+        summary=summary,
+    )
+
+
+def build_confirm_delete_block(
+    category: str,
+    entry_ids: List[str],
+    entries: List[Dict[str, Any]],
+    summary: str,
+    block_id: Optional[str] = None,
+) -> ConfirmDeleteBlock:
+    """Construct a validated ConfirmDeleteBlock for user delete confirmation."""
+    return ConfirmDeleteBlock(
+        id=block_id or make_block_id("confirm_delete"),
+        category=category,
+        entry_ids=entry_ids[:25],
+        entries=entries[:25],
+        summary=summary,
     )

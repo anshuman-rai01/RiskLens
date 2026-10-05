@@ -19,11 +19,12 @@ import asyncio
 import json
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Callable, Coroutine, Dict, List, Literal, Optional, Tuple, Type
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from app.database import async_session
 from app.models.entry import Entry
@@ -32,11 +33,13 @@ from app.schemas.assistant import (
     ChartBand,
     ChartSeries,
     MetricItem,
+    TableColumn,
 )
 from app.services.assistant.blocks import (
     build_chart_block,
     build_metrics_block,
     build_notice_block,
+    build_table_block,
 )
 from app.services.assistant.llm import ToolDeclaration
 from app.services.forecasting import compute_forecast
@@ -729,6 +732,261 @@ async def execute_build_report(
     return ToolExecutionResult(data=cap_data_payload(data), blocks=blocks)
 
 
+# ── Helper for safe date parsing ─────────────────────────────────
+
+def _safe_parse_date(val: Optional[str]) -> Optional[date]:
+    if not val:
+        return None
+    try:
+        return date.fromisoformat(val.strip())
+    except (ValueError, TypeError):
+        return None
+
+
+# ── Tool 3: find_entries ─────────────────────────────────────────
+
+class FindEntriesArgs(BaseModel):
+    category: Literal["income_expense", "savings", "study", "academic", "fitness", "habits"] = Field(
+        ...,
+        description="The category to search entries in."
+    )
+    start_date: Optional[str] = Field(
+        default=None,
+        description="Filter entries on or after this date (YYYY-MM-DD)."
+    )
+    end_date: Optional[str] = Field(
+        default=None,
+        description="Filter entries on or before this date (YYYY-MM-DD)."
+    )
+    search_text: Optional[str] = Field(
+        default=None,
+        description="Case-insensitive substring search in description, subcategory, or notes."
+    )
+    kind: Optional[Literal["income", "expense"]] = Field(
+        default=None,
+        description="Only for income_expense: filter by 'income' or 'expense'."
+    )
+    limit: int = Field(
+        default=10,
+        ge=1,
+        le=25,
+        description="Maximum entries to return (default 10, max 25)."
+    )
+
+
+FIND_ENTRIES_DECLARATION = ToolDeclaration(
+    name="find_entries",
+    description=(
+        "Search and filter the user's existing tracked entries across categories (income_expense, "
+        "savings, study, academic, fitness, habits). Always call this tool BEFORE proposing deletions, "
+        "and whenever the user asks to see, list, check, or find entries."
+    ),
+    parameters=FindEntriesArgs.model_json_schema(),
+)
+
+
+async def execute_find_entries(
+    args: FindEntriesArgs,
+    context: ToolContext,
+) -> ToolExecutionResult:
+    """
+    Search and filter existing user entries without mutating anything.
+    Excludes soft-deleted entries and enforces user isolation.
+    """
+    try:
+        user_uuid = uuid.UUID(str(context.user_id))
+    except Exception:
+        user_uuid = context.user_id
+
+    conditions = [
+        Entry.user_id == user_uuid,
+        Entry.category == args.category,
+        Entry.deleted_at.is_(None),
+    ]
+
+    parsed_start = _safe_parse_date(args.start_date)
+    if parsed_start:
+        conditions.append(Entry.occurred_at >= parsed_start)
+
+    parsed_end = _safe_parse_date(args.end_date)
+    if parsed_end:
+        conditions.append(Entry.occurred_at <= parsed_end)
+
+    if args.category == "income_expense" and args.kind:
+        conditions.append(Entry.notes.ilike(f"%{args.kind.strip()}%"))
+
+    if args.search_text and args.search_text.strip():
+        kw = f"%{args.search_text.strip()}%"
+        conditions.append(or_(Entry.notes.ilike(kw), Entry.subcategory.ilike(kw)))
+
+    async with async_session() as db:
+        count_stmt = select(func.count()).select_from(Entry).where(*conditions)
+        total_result = await db.execute(count_stmt)
+        total_matches = total_result.scalar() or 0
+
+        cat_title = args.category.replace("_", " ").title()
+
+        if total_matches == 0:
+            return ToolExecutionResult(
+                data={
+                    "status": "no_data",
+                    "category": args.category,
+                    "total_matches": 0,
+                    "returned_count": 0,
+                    "entries": [],
+                },
+                blocks=[
+                    build_notice_block(
+                        tone="info",
+                        text=f"No {cat_title.lower()} entries found matching your criteria.",
+                    )
+                ],
+            )
+
+        fetch_limit = min(args.limit, 25)
+        stmt = (
+            select(Entry)
+            .where(*conditions)
+            .order_by(Entry.occurred_at.desc(), Entry.created_at.desc())
+            .limit(fetch_limit)
+        )
+        result = await db.execute(stmt)
+        entries = list(result.scalars().all())
+
+    # Build data payload for LLM
+    entry_items: List[Dict[str, Any]] = []
+    for e in entries:
+        item: Dict[str, Any] = {
+            "id": str(e.id),
+            "date": e.occurred_at.isoformat(),
+            "category": e.category,
+            "subcategory": e.subcategory or "",
+            "value": float(e.value),
+            "unit": e.unit or "",
+            "notes": e.notes or "",
+        }
+        if e.max_value is not None:
+            item["max_value"] = float(e.max_value)
+        entry_items.append(item)
+
+    # Build TableBlock columns and rows tailored to the category
+    columns: List[TableColumn] = []
+    rows: List[Dict[str, Any]] = []
+
+    if args.category == "income_expense":
+        columns = [
+            TableColumn(key="date", label="Date"),
+            TableColumn(key="kind", label="Type"),
+            TableColumn(key="category", label="Category"),
+            TableColumn(key="amount", label="Amount", align="right"),
+        ]
+        for e in entries:
+            rows.append({
+                "id": str(e.id),
+                "date": e.occurred_at.isoformat(),
+                "kind": (e.notes or "expense").strip().capitalize(),
+                "category": sanitize_label(e.subcategory or "General"),
+                "amount": f"₹{float(e.value):,.2f}",
+            })
+    elif args.category == "savings":
+        columns = [
+            TableColumn(key="date", label="Date"),
+            TableColumn(key="vault", label="Vault"),
+            TableColumn(key="amount", label="Amount", align="right"),
+        ]
+        for e in entries:
+            rows.append({
+                "id": str(e.id),
+                "date": e.occurred_at.isoformat(),
+                "vault": sanitize_label(e.subcategory or "General"),
+                "amount": f"₹{float(e.value):,.2f}",
+            })
+    elif args.category == "study":
+        columns = [
+            TableColumn(key="date", label="Date"),
+            TableColumn(key="subject", label="Subject"),
+            TableColumn(key="hours", label="Hours", align="right"),
+            TableColumn(key="topic", label="Topic"),
+        ]
+        for e in entries:
+            rows.append({
+                "id": str(e.id),
+                "date": e.occurred_at.isoformat(),
+                "subject": sanitize_label(e.subcategory or "General"),
+                "hours": f"{float(e.value):g} hrs",
+                "topic": sanitize_label(e.notes or "—"),
+            })
+    elif args.category == "academic":
+        columns = [
+            TableColumn(key="date", label="Date"),
+            TableColumn(key="course", label="Course"),
+            TableColumn(key="assessment", label="Assessment"),
+            TableColumn(key="score", label="Score", align="right"),
+        ]
+        for e in entries:
+            score_str = f"{float(e.value):g}/{float(e.max_value):g}" if e.max_value else f"{float(e.value):g}"
+            rows.append({
+                "id": str(e.id),
+                "date": e.occurred_at.isoformat(),
+                "course": sanitize_label(e.subcategory or "General"),
+                "assessment": sanitize_label(e.notes or "—"),
+                "score": score_str,
+            })
+    elif args.category == "fitness":
+        columns = [
+            TableColumn(key="date", label="Date"),
+            TableColumn(key="activity", label="Activity"),
+            TableColumn(key="duration", label="Duration", align="right"),
+            TableColumn(key="intensity", label="Intensity"),
+        ]
+        for e in entries:
+            rows.append({
+                "id": str(e.id),
+                "date": e.occurred_at.isoformat(),
+                "activity": sanitize_label(e.subcategory or "General"),
+                "duration": f"{int(e.value)} min",
+                "intensity": sanitize_label(e.notes or "Moderate").capitalize(),
+            })
+    elif args.category == "habits":
+        columns = [
+            TableColumn(key="date", label="Date"),
+            TableColumn(key="habit", label="Habit"),
+            TableColumn(key="status", label="Status", align="center"),
+        ]
+        for e in entries:
+            rows.append({
+                "id": str(e.id),
+                "date": e.occurred_at.isoformat(),
+                "habit": sanitize_label(e.subcategory or "General"),
+                "status": "Done" if float(e.value) >= 1.0 else "Missed",
+            })
+
+    category_titles = {
+        "income_expense": "Income & Expenses Entries",
+        "savings": "Savings Entries",
+        "study": "Study Entries",
+        "academic": "Academic Entries",
+        "fitness": "Fitness Entries",
+        "habits": "Habits Entries",
+    }
+    table_block = build_table_block(
+        title=category_titles.get(args.category, f"{cat_title} Entries"),
+        columns=columns,
+        rows=rows,
+        total_count=total_matches,
+    )
+
+    data = {
+        "status": "ok",
+        "category": args.category,
+        "total_matches": total_matches,
+        "returned_count": len(entries),
+        "entries": entry_items,
+    }
+
+    return ToolExecutionResult(data=cap_data_payload(data), blocks=[table_block])
+
+
 # ── Registry Definition ──────────────────────────────────────────
 
 @dataclass
@@ -751,6 +1009,12 @@ TOOL_REGISTRY: Dict[str, RegisteredTool] = {
         declaration=BUILD_REPORT_DECLARATION,
         args_model=BuildReportArgs,
         handler=execute_build_report,
+    ),
+    "find_entries": RegisteredTool(
+        name="find_entries",
+        declaration=FIND_ENTRIES_DECLARATION,
+        args_model=FindEntriesArgs,
+        handler=execute_find_entries,
     ),
 }
 

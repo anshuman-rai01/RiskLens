@@ -53,12 +53,51 @@ export interface NoticeBlock {
   text: string;
 }
 
+export interface TableColumn {
+  key: string;
+  label: string;
+  align?: "left" | "right" | "center";
+}
+
+export interface TableBlock {
+  type: "table";
+  id: string;
+  title: string;
+  columns: TableColumn[];
+  rows: Record<string, any>[];
+  total_count?: number | null;
+}
+
+export interface ConfirmEntryBlock {
+  type: "confirm_entry";
+  id: string;
+  category: string;
+  payload: Record<string, any>;
+  preview: Record<string, any>;
+  summary: string;
+}
+
+export interface ConfirmDeleteBlock {
+  type: "confirm_delete";
+  id: string;
+  category: string;
+  entry_ids: string[];
+  entries: Record<string, any>[];
+  summary: string;
+}
+
 /**
  * Generic extensible block representation.
- * Known types are MetricsBlock, ChartBlock, NoticeBlock.
+ * Known types are MetricsBlock, ChartBlock, NoticeBlock, TableBlock, ConfirmEntryBlock, ConfirmDeleteBlock.
  * Unknown types must not crash the renderer (rendered as null).
  */
-export type KnownBlock = MetricsBlock | ChartBlock | NoticeBlock;
+export type KnownBlock =
+  | MetricsBlock
+  | ChartBlock
+  | NoticeBlock
+  | TableBlock
+  | ConfirmEntryBlock
+  | ConfirmDeleteBlock;
 
 export interface UnknownBlock {
   type: string;

@@ -232,7 +232,7 @@ async def run_assistant_agent(
         return AssistantChatResponse(
             id=response_id,
             text="I reached the limit of tool operations while analyzing your request. Here is the data collected so far:",
-            blocks=collected_blocks[:6],
+            blocks=collected_blocks[:10],
             outcome="degraded",
         )
 

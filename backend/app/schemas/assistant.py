@@ -102,8 +102,41 @@ class NoticeBlock(BaseModel):
     text: str
 
 
+class TableColumn(BaseModel):
+    key: str
+    label: str
+    align: Optional[Literal["left", "right", "center"]] = "left"
+
+
+class TableBlock(BaseModel):
+    type: Literal["table"] = "table"
+    id: str
+    title: str
+    columns: List[TableColumn] = Field(..., min_length=1, max_length=8)
+    rows: List[Dict[str, Any]] = Field(..., max_length=50)
+    total_count: Optional[int] = None
+
+
+class ConfirmEntryBlock(BaseModel):
+    type: Literal["confirm_entry"] = "confirm_entry"
+    id: str
+    category: str
+    payload: Dict[str, Any]
+    preview: Dict[str, Any]
+    summary: str
+
+
+class ConfirmDeleteBlock(BaseModel):
+    type: Literal["confirm_delete"] = "confirm_delete"
+    id: str
+    category: str
+    entry_ids: List[str] = Field(..., min_length=1, max_length=25)
+    entries: List[Dict[str, Any]] = Field(default_factory=list, max_length=25)
+    summary: str
+
+
 Block = Annotated[
-    Union[MetricsBlock, ChartBlock, NoticeBlock],
+    Union[MetricsBlock, ChartBlock, NoticeBlock, TableBlock, ConfirmEntryBlock, ConfirmDeleteBlock],
     Field(discriminator="type")
 ]
 
@@ -111,5 +144,5 @@ Block = Annotated[
 class AssistantChatResponse(BaseModel):
     id: str
     text: str
-    blocks: List[Block] = Field(default_factory=list, max_length=6)
+    blocks: List[Block] = Field(default_factory=list, max_length=10)
     outcome: Literal["ok", "degraded", "unavailable"]

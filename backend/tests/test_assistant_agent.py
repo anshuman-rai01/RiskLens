@@ -23,6 +23,7 @@ from app.services.assistant.llm import (
     LLMClient,
     LLMError,
     LLMMissingKeyError,
+    LLMQuotaError,
     LLMTimeoutError,
     LLMTurn,
     NeutralMessage,
@@ -278,4 +279,22 @@ async def test_agent_llm_exception_unavailable():
     )
     assert res.outcome == "unavailable"
     assert "secret API stack trace" not in res.text
+    assert len(res.blocks) == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_llm_quota_unavailable():
+    """LLM quota error (429/RESOURCE_EXHAUSTED) returns friendly busy message."""
+    fake_llm = ScriptedFakeLLM([LLMQuotaError("429 ResourceExhausted")])
+    req = AssistantChatRequest(
+        messages=[ChatMessage(role="user", text="Hello")]
+    )
+    res = await run_assistant_agent(
+        request=req,
+        user_id="00000000-0000-0000-0000-000000000010",
+        client_date=date(2026, 10, 4),
+        llm_client=fake_llm,
+    )
+    assert res.outcome == "unavailable"
+    assert res.text == "The assistant is busy right now. Please try again in a minute."
     assert len(res.blocks) == 0

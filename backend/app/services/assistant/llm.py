@@ -36,6 +36,10 @@ class ToolResult:
 class LLMTurn:
     text: Optional[str] = None
     tool_calls: List[ToolCall] = field(default_factory=list)
+    # Opaque provider-native model turn (for Gemini: the SDK Content object). It must be
+    # sent back UNMODIFIED when returning tool results: Gemini 3 attaches a thought
+    # signature to function-call parts and rejects the next request (HTTP 400) if it is lost.
+    raw: Any = None
 
 
 @dataclass
@@ -47,6 +51,7 @@ class UserMessage:
 class AssistantMessage:
     text: Optional[str] = None
     tool_calls: List[ToolCall] = field(default_factory=list)
+    raw: Any = None  # see LLMTurn.raw; only set for tool-call turns of the CURRENT request
 
 
 @dataclass
@@ -78,6 +83,11 @@ class LLMMissingKeyError(LLMError):
 
 class LLMTimeoutError(LLMError):
     """Raised when the LLM request exceeds the timeout deadline."""
+    pass
+
+
+class LLMQuotaError(LLMError):
+    """Raised when the LLM request fails due to rate limit or quota exhaustion (HTTP 429)."""
     pass
 
 
@@ -130,8 +140,9 @@ def sanitize_schema_for_gemini(schema: Dict[str, Any]) -> Dict[str, Any]:
 class GeminiClient:
     """
     Concrete implementation of LLMClient using google-genai.
-    Uses low temperature (0.2) and explicitly disables automatic function calling
-    so that tool execution, blocks collection, and limits stay in our control.
+    Keeps the model's default temperature (Google recommends 1.0 for Gemini 3; lower
+    values can cause looping or degraded results) and explicitly disables automatic
+    function calling so tool execution, blocks collection, and limits stay in our control.
     """
 
     def __init__(
@@ -181,7 +192,6 @@ class GeminiClient:
         # 2. Build GenerateContentConfig with temperature 0.2 and AFC disabled
         config = genai_types.GenerateContentConfig(
             system_instruction=system_instruction,
-            temperature=0.2,
             tools=sdk_tools if sdk_tools else None,
             automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
         )
@@ -197,6 +207,10 @@ class GeminiClient:
                     )
                 )
             elif isinstance(msg, AssistantMessage):
+                if msg.raw is not None:
+                    # Verbatim model turn (keeps thought signatures). Never rebuild it.
+                    contents.append(msg.raw)
+                    continue
                 parts: List[genai_types.Part] = []
                 if msg.text:
                     parts.append(genai_types.Part.from_text(text=msg.text))
@@ -237,10 +251,25 @@ class GeminiClient:
                 await asyncio.sleep(1.0)
             except Exception as exc:
                 err_msg = str(exc)
-                if ("503" in err_msg or "UNAVAILABLE" in err_msg or "429" in err_msg) and attempt < max_attempts - 1:
+                code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                is_quota = (
+                    code == 429
+                    or "429" in err_msg
+                    or "RESOURCE_EXHAUSTED" in err_msg
+                    or "quota" in err_msg.lower()
+                )
+                is_transient = (
+                    is_quota
+                    or code in (503, 500, 502, 504)
+                    or "503" in err_msg
+                    or "UNAVAILABLE" in err_msg
+                )
+                if is_transient and attempt < max_attempts - 1:
                     logger.info("Retrying Gemini request after transient error (attempt %d): %s", attempt + 1, err_msg[:80])
                     await asyncio.sleep(1.5 * (attempt + 1))
                     continue
+                if is_quota:
+                    raise LLMQuotaError(f"Gemini API quota exceeded: {exc}") from exc
                 raise LLMError(f"Gemini API request failed: {exc}") from exc
 
         # 5. Parse response candidates into LLMTurn
@@ -265,6 +294,7 @@ class GeminiClient:
         return LLMTurn(
             text="\n".join(text_pieces) if text_pieces else None,
             tool_calls=tool_calls,
+            raw=first_candidate.content,
         )
 
 

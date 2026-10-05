@@ -26,6 +26,7 @@ from app.services.assistant.llm import (
     LLMClient,
     LLMError,
     LLMMissingKeyError,
+    LLMQuotaError,
     LLMTimeoutError,
     NeutralMessage,
     ToolCall,
@@ -194,27 +195,35 @@ async def run_assistant_agent(
 
             # Process tool calls
             history_messages.append(
-                AssistantMessage(text=turn.text, tool_calls=turn.tool_calls)
+                AssistantMessage(text=turn.text, tool_calls=turn.tool_calls, raw=turn.raw)
             )
 
-            # Deduplicate identical (tool_name, serialized args) calls
+            # Execute identical (tool_name, serialized args) calls only once...
             unique_calls: List[ToolCall] = []
-            seen_signatures: Set[str] = set()
+            index_by_signature: Dict[str, int] = {}
+            call_signatures: List[str] = []
             for tc in turn.tool_calls:
                 sig = f"{tc.name}:{json.dumps(tc.args, sort_keys=True)}"
-                if sig not in seen_signatures:
-                    seen_signatures.add(sig)
+                call_signatures.append(sig)
+                if sig not in index_by_signature:
+                    index_by_signature[sig] = len(unique_calls)
                     unique_calls.append(tc)
 
-            # Concurrently execute all tool calls in this round
+            # Concurrently execute all unique tool calls in this round
             results = await asyncio.gather(
                 *[_execute_single_tool(tc, context) for tc in unique_calls]
             )
-
-            round_tool_results: List[ToolResult] = []
-            for tr, blocks in results:
-                round_tool_results.append(tr)
+            for _, blocks in results:  # blocks are collected once per executed call
                 collected_blocks.extend(blocks)
+
+            # ...but Gemini requires exactly one function response per function call,
+            # in the same order, so duplicates reuse the executed result.
+            round_tool_results: List[ToolResult] = []
+            for tc, sig in zip(turn.tool_calls, call_signatures):
+                shared, _ = results[index_by_signature[sig]]
+                round_tool_results.append(
+                    ToolResult(name=tc.name, call_id=shared.call_id, data=shared.data)
+                )
 
             history_messages.append(ToolResultMessage(results=round_tool_results))
 
@@ -243,8 +252,21 @@ async def run_assistant_agent(
             blocks=[],
             outcome="unavailable",
         )
+    except LLMQuotaError:
+        logger.warning("Assistant request failed: LLM quota exceeded")
+        return AssistantChatResponse(
+            id=response_id,
+            text="The assistant is busy right now. Please try again in a minute.",
+            blocks=[],
+            outcome="unavailable",
+        )
     except Exception as exc:
-        logger.warning("Assistant request failed with exception: %s", exc, exc_info=True)
+        logger.warning(
+            "Assistant request failed: type=%s status=%s",
+            type(exc).__name__,
+            getattr(exc, "code", None) or getattr(getattr(exc, "__cause__", None), "code", None),
+            exc_info=True,
+        )
         return AssistantChatResponse(
             id=response_id,
             text="The AI assistant is temporarily unavailable. Please try again later.",

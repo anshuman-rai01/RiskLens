@@ -37,6 +37,7 @@ from app.schemas.assistant import (
 )
 from app.services.assistant.blocks import (
     build_chart_block,
+    build_confirm_entry_block,
     build_metrics_block,
     build_notice_block,
     build_table_block,
@@ -997,6 +998,316 @@ class RegisteredTool:
     handler: Callable[[Any, ToolContext], Coroutine[Any, Any, ToolExecutionResult]]
 
 
+# ── Tool 4: propose_entry ────────────────────────────────────────
+
+class ProposeEntryArgs(BaseModel):
+    category: Literal["income_expense", "savings", "study", "academic", "fitness", "habits"] = Field(
+        ...,
+        description="Category to create: income_expense, savings, study, academic, fitness, or habits."
+    )
+    date: Optional[str] = Field(
+        default=None,
+        description="Date in YYYY-MM-DD format (defaults to user's local date if omitted)."
+    )
+    data: Dict[str, Any] = Field(
+        ...,
+        description=(
+            "Category-specific data: "
+            "income_expense: {kind: 'income'|'expense', amount: number, description: string}; "
+            "savings: {amount: number, vault: string}; "
+            "study: {subject: string, duration_minutes: number, topic?: string}; "
+            "academic: {course: string, assessment: string, obtained_marks: number, maximum_marks: number}; "
+            "fitness: {activity: string, duration_minutes: number, intensity?: 'low'|'moderate'|'high'}; "
+            "habits: {habit: string, completed?: boolean}."
+        )
+    )
+
+
+PROPOSE_ENTRY_DECLARATION = ToolDeclaration(
+    name="propose_entry",
+    description=(
+        "Propose adding a new entry to the user's tracking data. This tool validates the entry "
+        "and prepares a confirmation card for the user. It NEVER writes directly to the database; "
+        "the user must click Save in the chat widget to confirm."
+    ),
+    parameters=ProposeEntryArgs.model_json_schema(),
+)
+
+
+async def execute_propose_entry(
+    args: ProposeEntryArgs,
+    context: ToolContext,
+) -> ToolExecutionResult:
+    """
+    Validate proposed entry data and construct a ConfirmEntryBlock without mutating the database.
+    Zero-writes principle: the database is never modified in this tool.
+    """
+    errors: List[str] = []
+
+    # 1. Validate date
+    date_str = args.date.strip() if args.date and args.date.strip() else context.client_date.isoformat()
+    parsed_date = _safe_parse_date(date_str)
+    if not parsed_date:
+        errors.append(f"Invalid date '{date_str}'. Expected format YYYY-MM-DD.")
+    else:
+        # Check not far future (today + 1 day max)
+        max_allowed_date = context.client_date + timedelta(days=1)
+        if parsed_date > max_allowed_date:
+            errors.append(f"Date {date_str} cannot be in the future (more than 1 day ahead).")
+
+    raw_data = args.data or {}
+    payload: Dict[str, Any] = {"date": date_str}
+    preview: Dict[str, Any] = {"Date": date_str}
+    summary: str = ""
+
+    # 2. Per-category validation and payload mapping
+    cat = args.category
+    if cat == "income_expense":
+        kind = str(raw_data.get("kind", "expense")).strip().lower()
+        if kind not in ("income", "expense"):
+            errors.append("Type must be 'income' or 'expense'.")
+
+        try:
+            amount = float(raw_data.get("amount", 0))
+            if amount <= 0:
+                errors.append("Amount must be greater than 0.")
+        except (ValueError, TypeError):
+            errors.append("Amount must be a valid positive number.")
+            amount = 0.0
+
+        description = str(raw_data.get("description", raw_data.get("label", ""))).strip()
+        if not description:
+            errors.append("Description is required.")
+        elif len(description) > 80:
+            errors.append("Description must be under 80 characters.")
+
+        payload.update({
+            "kind": kind,
+            "amount": round(amount, 2),
+            "label": description,
+        })
+        preview.update({
+            "Type": kind.capitalize(),
+            "Category / Label": description,
+            "Amount": f"₹{amount:,.2f}",
+        })
+        summary = f"Add {kind}: ₹{amount:,.2f} for {description} on {date_str}"
+
+    elif cat == "savings":
+        try:
+            amount = float(raw_data.get("amount", 0))
+            if amount <= 0:
+                errors.append("Amount must be greater than 0.")
+        except (ValueError, TypeError):
+            errors.append("Amount must be a valid positive number.")
+            amount = 0.0
+
+        vault = str(raw_data.get("vault", raw_data.get("goal", ""))).strip()
+        if not vault:
+            errors.append("Vault / Goal name is required.")
+        elif len(vault) > 80:
+            errors.append("Vault name must be under 80 characters.")
+
+        payload.update({
+            "amount": round(amount, 2),
+            "vault": vault,
+        })
+        preview.update({
+            "Vault": vault,
+            "Amount": f"₹{amount:,.2f}",
+        })
+        summary = f"Add savings: ₹{amount:,.2f} to {vault} on {date_str}"
+
+    elif cat == "study":
+        subject = str(raw_data.get("subject", "")).strip()
+        if not subject:
+            errors.append("Subject is required.")
+        elif len(subject) > 80:
+            errors.append("Subject must be under 80 characters.")
+
+        # Accept duration_minutes or hours
+        duration_minutes = raw_data.get("duration_minutes")
+        if duration_minutes is not None:
+            try:
+                duration_minutes = float(duration_minutes)
+                if duration_minutes <= 0:
+                    errors.append("Duration must be greater than 0 minutes.")
+            except (ValueError, TypeError):
+                errors.append("Duration must be a valid number.")
+                duration_minutes = 0.0
+        elif "hours" in raw_data:
+            try:
+                hours = float(raw_data["hours"])
+                duration_minutes = hours * 60.0
+                if duration_minutes <= 0:
+                    errors.append("Duration must be greater than 0.")
+            except (ValueError, TypeError):
+                errors.append("Hours must be a valid number.")
+                duration_minutes = 0.0
+        else:
+            errors.append("duration_minutes (or hours) is required.")
+            duration_minutes = 0.0
+
+        topic = str(raw_data.get("topic", "")).strip()
+        if len(topic) > 80:
+            errors.append("Topic must be under 80 characters.")
+
+        hours_val = round(duration_minutes / 60.0, 2)
+        payload.update({
+            "subject": subject,
+            "hours": hours_val,
+            "topic": topic,
+        })
+        preview.update({
+            "Subject": subject,
+            "Duration": f"{int(duration_minutes)} min ({hours_val:g}h)",
+            "Topic": topic or "—",
+        })
+        summary = f"Add study session: {int(duration_minutes)} min of {subject} on {date_str}"
+
+    elif cat == "academic":
+        course = str(raw_data.get("course", "")).strip()
+        if not course:
+            errors.append("Course is required.")
+        elif len(course) > 80:
+            errors.append("Course must be under 80 characters.")
+
+        assessment = str(raw_data.get("assessment", "")).strip()
+        if not assessment:
+            errors.append("Assessment name is required.")
+        elif len(assessment) > 80:
+            errors.append("Assessment name must be under 80 characters.")
+
+        try:
+            score = float(raw_data.get("obtained_marks", raw_data.get("score", 0)))
+            if score < 0:
+                errors.append("Obtained marks cannot be negative.")
+        except (ValueError, TypeError):
+            errors.append("Obtained marks must be a valid number.")
+            score = 0.0
+
+        try:
+            max_score = float(raw_data.get("maximum_marks", raw_data.get("maxScore", 0)))
+            if max_score <= 0:
+                errors.append("Maximum marks must be greater than 0.")
+        except (ValueError, TypeError):
+            errors.append("Maximum marks must be a valid number.")
+            max_score = 0.0
+
+        if score > max_score and max_score > 0:
+            errors.append("Obtained marks cannot exceed maximum marks.")
+
+        payload.update({
+            "course": course,
+            "assessment": assessment,
+            "score": round(score, 2),
+            "maxScore": round(max_score, 2),
+        })
+        preview.update({
+            "Course": course,
+            "Assessment": assessment,
+            "Score": f"{score:g} / {max_score:g}",
+        })
+        summary = f"Add academic score: {score:g}/{max_score:g} for {assessment} in {course} on {date_str}"
+
+    elif cat == "fitness":
+        activity = str(raw_data.get("activity", "")).strip()
+        if not activity:
+            errors.append("Activity is required.")
+        elif len(activity) > 80:
+            errors.append("Activity must be under 80 characters.")
+
+        try:
+            minutes = float(raw_data.get("duration_minutes", raw_data.get("minutes", 0)))
+            if minutes <= 0:
+                errors.append("Duration must be greater than 0 minutes.")
+        except (ValueError, TypeError):
+            errors.append("Duration must be a valid number.")
+            minutes = 0.0
+
+        intensity = str(raw_data.get("intensity", "moderate")).strip().lower()
+        if intensity not in ("low", "moderate", "high"):
+            errors.append("Intensity must be 'low', 'moderate', or 'high'.")
+
+        payload.update({
+            "activity": activity,
+            "minutes": int(minutes),
+            "intensity": intensity,
+        })
+        preview.update({
+            "Activity": activity,
+            "Duration": f"{int(minutes)} min",
+            "Intensity": intensity.capitalize(),
+        })
+        summary = f"Add fitness: {int(minutes)} min of {activity} ({intensity}) on {date_str}"
+
+    elif cat == "habits":
+        habit = str(raw_data.get("habit", "")).strip()
+        if not habit:
+            errors.append("Habit name is required.")
+        elif len(habit) > 80:
+            errors.append("Habit name must be under 80 characters.")
+
+        completed_raw = raw_data.get("completed", True)
+        if isinstance(completed_raw, str):
+            completed = completed_raw.lower() not in ("false", "0", "no")
+        else:
+            completed = bool(completed_raw)
+
+        payload.update({
+            "habit": habit,
+            "completed": completed,
+        })
+        preview.update({
+            "Habit": habit,
+            "Status": "Completed" if completed else "Missed",
+        })
+        summary = f"Add habit: {habit} ({'Completed' if completed else 'Missed'}) on {date_str}"
+
+    # 3. Handle errors if any
+    if errors:
+        return ToolExecutionResult(
+            data={
+                "status": "invalid",
+                "category": cat,
+                "errors": errors,
+            },
+            blocks=[
+                build_notice_block(
+                    tone="warn",
+                    text=f"Cannot propose {cat.replace('_', ' ')} entry: " + "; ".join(errors),
+                )
+            ],
+        )
+
+    # 4. Success: produce ConfirmEntryBlock
+    confirm_block = build_confirm_entry_block(
+        category=cat,
+        payload=payload,
+        preview=preview,
+        summary=summary,
+    )
+
+    data = {
+        "status": "ok",
+        "category": cat,
+        "summary": summary,
+        "preview": preview,
+        "payload": payload,
+    }
+    return ToolExecutionResult(data=cap_data_payload(data), blocks=[confirm_block])
+
+
+# ── Registry Definition ──────────────────────────────────────────
+
+@dataclass
+class RegisteredTool:
+    name: str
+    declaration: ToolDeclaration
+    args_model: Type[BaseModel]
+    handler: Callable[[Any, ToolContext], Coroutine[Any, Any, ToolExecutionResult]]
+
+
 TOOL_REGISTRY: Dict[str, RegisteredTool] = {
     "get_forecast": RegisteredTool(
         name="get_forecast",
@@ -1015,6 +1326,12 @@ TOOL_REGISTRY: Dict[str, RegisteredTool] = {
         declaration=FIND_ENTRIES_DECLARATION,
         args_model=FindEntriesArgs,
         handler=execute_find_entries,
+    ),
+    "propose_entry": RegisteredTool(
+        name="propose_entry",
+        declaration=PROPOSE_ENTRY_DECLARATION,
+        args_model=ProposeEntryArgs,
+        handler=execute_propose_entry,
     ),
 }
 

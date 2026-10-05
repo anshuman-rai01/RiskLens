@@ -16,11 +16,15 @@ import {
   AssistantChatResponse,
   AssistantMessageState,
   ChatMessage,
+  ConfirmDeleteBlock as ConfirmDeleteBlockType,
+  ConfirmEntryBlock as ConfirmEntryBlockType,
 } from "../../lib/assistantTypes";
 import { sendAssistantMessage } from "../../lib/assistantApi";
 import { FIXTURE_RESPONSES } from "./fixtures";
 import { BlockRenderer } from "./BlockRenderer";
 import { I } from "../icons";
+import { Category } from "../../lib/types";
+import { createEntry, deleteEntry, validateEntryPayload } from "../../lib/db";
 
 export interface ChatWidgetProps {
   /** Optional custom send function for fixture testing */
@@ -52,10 +56,136 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<AssistantMessageState[]>([]);
+  const [actionStates, setActionStates] = useState<
+    Record<
+      string,
+      {
+        status:
+          | "idle"
+          | "saving"
+          | "saved"
+          | "deleting"
+          | "deleted"
+          | "cancelled"
+          | "error";
+        error?: string;
+      }
+    >
+  >({});
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const handleConfirmEntry = useCallback(
+    async (block: ConfirmEntryBlockType) => {
+      setActionStates((prev) => ({
+        ...prev,
+        [block.id]: { status: "saving" },
+      }));
+
+      try {
+        const occurredDate =
+          (block.payload.date as string) || getLocalClientDate();
+        const { errors } = validateEntryPayload(
+          block.category as Category,
+          block.payload,
+          occurredDate
+        );
+
+        if (Object.keys(errors).length > 0) {
+          const errMsg = Object.values(errors).join("; ");
+          setActionStates((prev) => ({
+            ...prev,
+            [block.id]: { status: "error", error: errMsg },
+          }));
+          return;
+        }
+
+        await createEntry(
+          block.category as Category,
+          block.payload,
+          occurredDate,
+          ""
+        );
+
+        setActionStates((prev) => ({
+          ...prev,
+          [block.id]: { status: "saved" },
+        }));
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `sys_${Date.now()}`,
+            role: "assistant",
+            text: `Saved: ${block.summary}`,
+          },
+        ]);
+      } catch (err: any) {
+        setActionStates((prev) => ({
+          ...prev,
+          [block.id]: {
+            status: "error",
+            error: err?.message || "Failed to save entry. Please try again.",
+          },
+        }));
+      }
+    },
+    []
+  );
+
+  const handleCancelEntry = useCallback((block: ConfirmEntryBlockType) => {
+    setActionStates((prev) => ({
+      ...prev,
+      [block.id]: { status: "cancelled" },
+    }));
+  }, []);
+
+  const handleConfirmDelete = useCallback(
+    async (block: ConfirmDeleteBlockType) => {
+      setActionStates((prev) => ({
+        ...prev,
+        [block.id]: { status: "deleting" },
+      }));
+
+      try {
+        for (const entryId of block.entry_ids) {
+          await deleteEntry(entryId);
+        }
+
+        setActionStates((prev) => ({
+          ...prev,
+          [block.id]: { status: "deleted" },
+        }));
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `sys_${Date.now()}`,
+            role: "assistant",
+            text: `Deleted: ${block.summary}`,
+          },
+        ]);
+      } catch (err: any) {
+        setActionStates((prev) => ({
+          ...prev,
+          [block.id]: {
+            status: "error",
+            error: err?.message || "Failed to delete entries. Please try again.",
+          },
+        }));
+      }
+    },
+    []
+  );
+
+  const handleCancelDelete = useCallback((block: ConfirmDeleteBlockType) => {
+    setActionStates((prev) => ({
+      ...prev,
+      [block.id]: { status: "cancelled" },
+    }));
+  }, []);
 
   // Auto-scroll to bottom of messages
   const scrollToBottom = () => {
@@ -297,11 +427,22 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
                       )}
                     </div>
 
-                    {/* Structured Blocks (metrics, chart, notice) */}
+                    {/* Structured Blocks (metrics, chart, notice, table, confirm_entry, confirm_delete) */}
                     {!isUser && msg.blocks && msg.blocks.length > 0 && (
                       <div className="w-full space-y-2 pt-1">
                         {msg.blocks.map((block) => (
-                          <BlockRenderer key={block.id} block={block} />
+                          <BlockRenderer
+                            key={block.id}
+                            block={block}
+                            entryStatus={actionStates[block.id]?.status as any}
+                            entryError={actionStates[block.id]?.error}
+                            onConfirmEntry={handleConfirmEntry}
+                            onCancelEntry={handleCancelEntry}
+                            deleteStatus={actionStates[block.id]?.status as any}
+                            deleteError={actionStates[block.id]?.error}
+                            onConfirmDelete={handleConfirmDelete}
+                            onCancelDelete={handleCancelDelete}
+                          />
                         ))}
                       </div>
                     )}

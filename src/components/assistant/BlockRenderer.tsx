@@ -4,9 +4,19 @@ import { MetricsBlock } from "./MetricsBlock";
 import { ChartBlock } from "./ChartBlock";
 import { NoticeBlock } from "./NoticeBlock";
 import { TableBlock } from "./TableBlock";
+import { ConfirmEntryBlock } from "./ConfirmEntryBlock";
+import { ConfirmEntryBlock as ConfirmEntryBlockType, ConfirmDeleteBlock as ConfirmDeleteBlockType } from "../../lib/assistantTypes";
 
 interface BlockRendererProps {
   block: Block;
+  entryStatus?: "idle" | "saving" | "saved" | "cancelled" | "error";
+  entryError?: string;
+  onConfirmEntry?: (block: ConfirmEntryBlockType) => void;
+  onCancelEntry?: (block: ConfirmEntryBlockType) => void;
+  deleteStatus?: "idle" | "deleting" | "deleted" | "cancelled" | "error";
+  deleteError?: string;
+  onConfirmDelete?: (block: ConfirmDeleteBlockType) => void;
+  onCancelDelete?: (block: ConfirmDeleteBlockType) => void;
 }
 
 /**
@@ -20,9 +30,33 @@ const BLOCK_REGISTRY: Record<string, React.ComponentType<{ block: any }>> = {
   table: TableBlock,
 };
 
-export const BlockRenderer: React.FC<BlockRendererProps> = ({ block }) => {
+export const BlockRenderer: React.FC<BlockRendererProps> = ({
+  block,
+  entryStatus,
+  entryError,
+  onConfirmEntry,
+  onCancelEntry,
+  deleteStatus,
+  deleteError,
+  onConfirmDelete,
+  onCancelDelete,
+}) => {
   if (!block || typeof block !== "object" || !block.type) {
     return null;
+  }
+
+  if (block.type === "confirm_entry") {
+    return (
+      <div className="w-full my-1">
+        <ConfirmEntryBlock
+          block={block as ConfirmEntryBlockType}
+          status={entryStatus}
+          error={entryError}
+          onConfirm={onConfirmEntry ? () => onConfirmEntry(block as ConfirmEntryBlockType) : undefined}
+          onCancel={onCancelEntry ? () => onCancelEntry(block as ConfirmEntryBlockType) : undefined}
+        />
+      </div>
+    );
   }
 
   const Component = BLOCK_REGISTRY[block.type];

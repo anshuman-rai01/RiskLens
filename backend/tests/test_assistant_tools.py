@@ -22,10 +22,12 @@ from app.services.assistant.tools import (
     BuildReportArgs,
     FindEntriesArgs,
     GetForecastArgs,
+    ProposeEntryArgs,
     ToolContext,
     execute_build_report,
     execute_find_entries,
     execute_get_forecast,
+    execute_propose_entry,
 )
 
 
@@ -551,4 +553,162 @@ async def test_find_entries_category_formatting():
         hab_res = await execute_find_entries(FindEntriesArgs(category="habits"), ctx)
         assert hab_res.blocks[0].type == "table"
         assert hab_res.blocks[0].rows[0]["status"] == "Done"
+
+
+@pytest.mark.asyncio
+async def test_propose_entry_all_categories_and_zero_writes():
+    """Verify propose_entry generates correct ConfirmEntryBlocks for all categories with zero DB writes."""
+    from sqlalchemy import func, select
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        user_id = await register_user(client, "pe_all")
+        today = date(2026, 10, 4)
+        ctx = ToolContext(user_id=user_id, client_date=today)
+
+        # Count DB entries before any proposals
+        async with async_session() as db:
+            before_count = (await db.execute(select(func.count()).select_from(Entry))).scalar() or 0
+
+        # 1. income_expense
+        res_ie = await execute_propose_entry(
+            ProposeEntryArgs(
+                category="income_expense",
+                data={"kind": "expense", "amount": 450.0, "description": "Groceries haul"},
+            ),
+            ctx,
+        )
+        assert res_ie.data["status"] == "ok"
+        assert res_ie.data["payload"]["kind"] == "expense"
+        assert res_ie.data["payload"]["amount"] == 450.0
+        assert res_ie.data["payload"]["label"] == "Groceries haul"
+        assert len(res_ie.blocks) == 1
+        assert res_ie.blocks[0].type == "confirm_entry"
+        assert "450" in res_ie.blocks[0].summary
+
+        # 2. savings
+        res_sav = await execute_propose_entry(
+            ProposeEntryArgs(
+                category="savings",
+                data={"amount": 5000.0, "vault": "Emergency Fund"},
+            ),
+            ctx,
+        )
+        assert res_sav.data["status"] == "ok"
+        assert res_sav.data["payload"]["vault"] == "Emergency Fund"
+        assert res_sav.blocks[0].type == "confirm_entry"
+
+        # 3. study (duration_minutes -> hours)
+        res_std = await execute_propose_entry(
+            ProposeEntryArgs(
+                category="study",
+                data={"subject": "Machine Learning", "duration_minutes": 90, "topic": "Deep learning"},
+            ),
+            ctx,
+        )
+        assert res_std.data["status"] == "ok"
+        assert res_std.data["payload"]["hours"] == 1.5
+        assert res_std.data["payload"]["subject"] == "Machine Learning"
+        assert res_std.blocks[0].type == "confirm_entry"
+
+        # 4. academic (obtained_marks & maximum_marks -> score & maxScore)
+        res_acd = await execute_propose_entry(
+            ProposeEntryArgs(
+                category="academic",
+                data={"course": "Calculus", "assessment": "Final Exam", "obtained_marks": 92.0, "maximum_marks": 100.0},
+            ),
+            ctx,
+        )
+        assert res_acd.data["status"] == "ok"
+        assert res_acd.data["payload"]["score"] == 92.0
+        assert res_acd.data["payload"]["maxScore"] == 100.0
+        assert res_acd.blocks[0].type == "confirm_entry"
+
+        # 5. fitness
+        res_fit = await execute_propose_entry(
+            ProposeEntryArgs(
+                category="fitness",
+                data={"activity": "Running", "duration_minutes": 30, "intensity": "high"},
+            ),
+            ctx,
+        )
+        assert res_fit.data["status"] == "ok"
+        assert res_fit.data["payload"]["minutes"] == 30
+        assert res_fit.data["payload"]["intensity"] == "high"
+        assert res_fit.blocks[0].type == "confirm_entry"
+
+        # 6. habits
+        res_hab = await execute_propose_entry(
+            ProposeEntryArgs(
+                category="habits",
+                data={"habit": "Meditation", "completed": True},
+            ),
+            ctx,
+        )
+        assert res_hab.data["status"] == "ok"
+        assert res_hab.data["payload"]["completed"] is True
+        assert res_hab.blocks[0].type == "confirm_entry"
+
+        # Zero-writes check: verify DB row count did not change!
+        async with async_session() as db:
+            after_count = (await db.execute(select(func.count()).select_from(Entry))).scalar() or 0
+        assert before_count == after_count
+
+
+@pytest.mark.asyncio
+async def test_propose_entry_validation_errors():
+    """Verify propose_entry rejects invalid inputs and returns informative NoticeBlocks."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        user_id = await register_user(client, "pe_val")
+        today = date(2026, 10, 4)
+        ctx = ToolContext(user_id=user_id, client_date=today)
+
+        # 1. Negative amount
+        res_neg = await execute_propose_entry(
+            ProposeEntryArgs(
+                category="income_expense",
+                data={"kind": "expense", "amount": -100.0, "description": "Negative"},
+            ),
+            ctx,
+        )
+        assert res_neg.data["status"] == "invalid"
+        assert len(res_neg.blocks) == 1
+        assert res_neg.blocks[0].type == "notice"
+        assert res_neg.blocks[0].tone == "warn"
+
+        # 2. Far future date (> today + 1 day)
+        res_fut = await execute_propose_entry(
+            ProposeEntryArgs(
+                category="income_expense",
+                date="2026-10-10",
+                data={"kind": "expense", "amount": 500.0, "description": "Future expense"},
+            ),
+            ctx,
+        )
+        assert res_fut.data["status"] == "invalid"
+        assert "future" in res_fut.blocks[0].text
+
+        # 3. Academic obtained_marks > maximum_marks
+        res_acad = await execute_propose_entry(
+            ProposeEntryArgs(
+                category="academic",
+                data={"course": "CS101", "assessment": "Quiz", "obtained_marks": 110.0, "maximum_marks": 100.0},
+            ),
+            ctx,
+        )
+        assert res_acad.data["status"] == "invalid"
+        assert "cannot exceed maximum marks" in res_acad.blocks[0].text
+
+        # 4. Missing required description
+        res_nodesc = await execute_propose_entry(
+            ProposeEntryArgs(
+                category="income_expense",
+                data={"kind": "expense", "amount": 200.0, "description": ""},
+            ),
+            ctx,
+        )
+        assert res_nodesc.data["status"] == "invalid"
+        assert "Description is required" in res_nodesc.blocks[0].text
+
 

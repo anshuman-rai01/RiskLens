@@ -5,6 +5,7 @@ import { ChartBlock } from "./ChartBlock";
 import { NoticeBlock } from "./NoticeBlock";
 import { TableBlock } from "./TableBlock";
 import { ConfirmEntryBlock } from "./ConfirmEntryBlock";
+import { ConfirmDeleteBlock } from "./ConfirmDeleteBlock";
 import { ConfirmEntryBlock as ConfirmEntryBlockType, ConfirmDeleteBlock as ConfirmDeleteBlockType } from "../../lib/assistantTypes";
 
 interface BlockRendererProps {
@@ -54,6 +55,20 @@ export const BlockRenderer: React.FC<BlockRendererProps> = ({
           error={entryError}
           onConfirm={onConfirmEntry ? () => onConfirmEntry(block as ConfirmEntryBlockType) : undefined}
           onCancel={onCancelEntry ? () => onCancelEntry(block as ConfirmEntryBlockType) : undefined}
+        />
+      </div>
+    );
+  }
+
+  if (block.type === "confirm_delete") {
+    return (
+      <div className="w-full my-1">
+        <ConfirmDeleteBlock
+          block={block as ConfirmDeleteBlockType}
+          status={deleteStatus}
+          error={deleteError}
+          onConfirm={onConfirmDelete ? () => onConfirmDelete(block as ConfirmDeleteBlockType) : undefined}
+          onCancel={onCancelDelete ? () => onCancelDelete(block as ConfirmDeleteBlockType) : undefined}
         />
       </div>
     );

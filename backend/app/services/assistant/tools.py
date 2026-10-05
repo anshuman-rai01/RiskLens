@@ -37,6 +37,7 @@ from app.schemas.assistant import (
 )
 from app.services.assistant.blocks import (
     build_chart_block,
+    build_confirm_delete_block,
     build_confirm_entry_block,
     build_metrics_block,
     build_notice_block,
@@ -1308,6 +1309,143 @@ class RegisteredTool:
     handler: Callable[[Any, ToolContext], Coroutine[Any, Any, ToolExecutionResult]]
 
 
+# ── Tool 5: propose_delete ───────────────────────────────────────
+
+class ProposeDeleteArgs(BaseModel):
+    category: Literal["income_expense", "savings", "study", "academic", "fitness", "habits"] = Field(
+        ...,
+        description="Category of the entries to delete."
+    )
+    entry_ids: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=25,
+        description="List of entry IDs (UUID strings) to delete."
+    )
+
+
+PROPOSE_DELETE_DECLARATION = ToolDeclaration(
+    name="propose_delete",
+    description=(
+        "Propose deleting one or more existing entries identified by ID. Always call find_entries "
+        "first to obtain the exact IDs. This tool validates the entries and prepares a confirmation "
+        "card for the user. It NEVER writes directly to the database; the user must click Delete "
+        "in the chat widget to confirm."
+    ),
+    parameters=ProposeDeleteArgs.model_json_schema(),
+)
+
+
+async def execute_propose_delete(
+    args: ProposeDeleteArgs,
+    context: ToolContext,
+) -> ToolExecutionResult:
+    """
+    Validate proposed entry IDs for deletion without modifying the database.
+    Zero-writes principle: the database is never mutated by this tool.
+    """
+    try:
+        user_uuid = uuid.UUID(str(context.user_id))
+    except Exception:
+        user_uuid = context.user_id
+
+    # Parse UUIDs safely
+    parsed_ids: List[uuid.UUID] = []
+    invalid_format_ids: List[str] = []
+    for raw_id in args.entry_ids:
+        try:
+            parsed_ids.append(uuid.UUID(str(raw_id).strip()))
+        except (ValueError, TypeError):
+            invalid_format_ids.append(str(raw_id))
+
+    if invalid_format_ids:
+        return ToolExecutionResult(
+            data={
+                "status": "invalid",
+                "error": f"Invalid entry ID format: {', '.join(invalid_format_ids)}",
+                "category": args.category,
+            },
+            blocks=[
+                build_notice_block(
+                    tone="warn",
+                    text=f"Cannot propose deletion: {len(invalid_format_ids)} ID(s) are malformed.",
+                )
+            ],
+        )
+
+    # Query existing active entries belonging to user and category
+    async with async_session() as db:
+        stmt = (
+            select(Entry)
+            .where(
+                Entry.user_id == user_uuid,
+                Entry.category == args.category,
+                Entry.id.in_(parsed_ids),
+                Entry.deleted_at.is_(None),
+            )
+        )
+        result = await db.execute(stmt)
+        found_entries = list(result.scalars().all())
+
+    found_by_id = {str(e.id): e for e in found_entries}
+    missing_ids = [str(pid) for pid in parsed_ids if str(pid) not in found_by_id]
+
+    if not found_entries:
+        return ToolExecutionResult(
+            data={
+                "status": "not_found",
+                "category": args.category,
+                "missing_ids": missing_ids,
+            },
+            blocks=[
+                build_notice_block(
+                    tone="warn",
+                    text=f"None of the requested {args.category.replace('_', ' ')} entries were found or they are already deleted.",
+                )
+            ],
+        )
+
+    # Format found entries for preview
+    entries_preview: List[Dict[str, Any]] = []
+    for e in found_entries:
+        val_str = f"₹{float(e.value):,.2f}" if args.category in ("income_expense", "savings") else f"{float(e.value):g} {e.unit or ''}"
+        entries_preview.append({
+            "id": str(e.id),
+            "date": e.occurred_at.isoformat(),
+            "category": e.category,
+            "label": sanitize_label(e.subcategory or "General"),
+            "value": val_str.strip(),
+            "notes": e.notes or "",
+        })
+
+    valid_entry_ids = [str(e.id) for e in found_entries]
+
+    if len(valid_entry_ids) == 1:
+        e = found_entries[0]
+        label = sanitize_label(e.subcategory or "entry")
+        summary = f"Delete {args.category.replace('_', ' ')}: {label} from {e.occurred_at.isoformat()}"
+    else:
+        summary = f"Delete {len(valid_entry_ids)} {args.category.replace('_', ' ')} entries"
+
+    confirm_block = build_confirm_delete_block(
+        category=args.category,
+        entry_ids=valid_entry_ids,
+        entries=entries_preview,
+        summary=summary,
+    )
+
+    data = {
+        "status": "ok",
+        "category": args.category,
+        "entry_ids": valid_entry_ids,
+        "entries": entries_preview,
+        "summary": summary,
+        **({"warning": f"{len(missing_ids)} ID(s) were not found."} if missing_ids else {}),
+    }
+
+    return ToolExecutionResult(data=cap_data_payload(data), blocks=[confirm_block])
+
+
 TOOL_REGISTRY: Dict[str, RegisteredTool] = {
     "get_forecast": RegisteredTool(
         name="get_forecast",
@@ -1332,6 +1470,12 @@ TOOL_REGISTRY: Dict[str, RegisteredTool] = {
         declaration=PROPOSE_ENTRY_DECLARATION,
         args_model=ProposeEntryArgs,
         handler=execute_propose_entry,
+    ),
+    "propose_delete": RegisteredTool(
+        name="propose_delete",
+        declaration=PROPOSE_DELETE_DECLARATION,
+        args_model=ProposeDeleteArgs,
+        handler=execute_propose_delete,
     ),
 }
 

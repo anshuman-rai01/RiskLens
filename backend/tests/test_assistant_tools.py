@@ -10,6 +10,7 @@ Tests for Assistant tools (build_report and get_forecast) covering:
 from __future__ import annotations
 
 import time
+import uuid
 from datetime import date, timedelta
 import httpx
 import pytest
@@ -22,11 +23,13 @@ from app.services.assistant.tools import (
     BuildReportArgs,
     FindEntriesArgs,
     GetForecastArgs,
+    ProposeDeleteArgs,
     ProposeEntryArgs,
     ToolContext,
     execute_build_report,
     execute_find_entries,
     execute_get_forecast,
+    execute_propose_delete,
     execute_propose_entry,
 )
 
@@ -710,5 +713,153 @@ async def test_propose_entry_validation_errors():
         )
         assert res_nodesc.data["status"] == "invalid"
         assert "Description is required" in res_nodesc.blocks[0].text
+
+
+@pytest.mark.asyncio
+async def test_propose_delete_valid_and_zero_writes():
+    """Verify propose_delete creates ConfirmDeleteBlock and never writes or deletes rows."""
+    from sqlalchemy import func, select
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        user_id = await register_user(client, "pd_valid")
+        today = date(2026, 10, 4)
+
+        entry1_id = None
+        entry2_id = None
+        async with async_session() as db:
+            e1 = Entry(
+                user_id=user_id,
+                category="fitness",
+                subcategory="Running",
+                value=30.0,
+                unit="minutes",
+                occurred_at=today,
+                notes="morning jog",
+            )
+            e2 = Entry(
+                user_id=user_id,
+                category="fitness",
+                subcategory="Yoga",
+                value=20.0,
+                unit="minutes",
+                occurred_at=today,
+                notes="evening stretch",
+            )
+            db.add_all([e1, e2])
+            await db.commit()
+            await db.refresh(e1)
+            await db.refresh(e2)
+            entry1_id = str(e1.id)
+            entry2_id = str(e2.id)
+
+        ctx = ToolContext(user_id=user_id, client_date=today)
+
+        # Propose deleting both entries
+        res = await execute_propose_delete(
+            ProposeDeleteArgs(category="fitness", entry_ids=[entry1_id, entry2_id]),
+            ctx,
+        )
+        assert res.data["status"] == "ok"
+        assert len(res.data["entry_ids"]) == 2
+        assert len(res.blocks) == 1
+        assert res.blocks[0].type == "confirm_delete"
+        assert res.blocks[0].summary == "Delete 2 fitness entries"
+        assert len(res.blocks[0].entries) == 2
+
+        # Verify ZERO WRITES: rows still exist and deleted_at is still None!
+        async with async_session() as db:
+            active_entries = list(
+                (
+                    await db.execute(
+                        select(Entry).where(
+                            Entry.id.in_([uuid.UUID(entry1_id), uuid.UUID(entry2_id)]),
+                            Entry.deleted_at.is_(None),
+                        )
+                    )
+                ).scalars().all()
+            )
+            assert len(active_entries) == 2
+
+
+@pytest.mark.asyncio
+async def test_propose_delete_isolation_and_soft_delete():
+    """Verify propose_delete rejects entries from other users or already soft-deleted entries."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        user_a = await register_user(client, "pd_iso_a")
+        user_b = await register_user(client, "pd_iso_b")
+        today = date(2026, 10, 4)
+
+        user_b_entry_id = None
+        user_a_deleted_entry_id = None
+
+        async with async_session() as db:
+            # User B entry
+            eb = Entry(
+                user_id=user_b,
+                category="income_expense",
+                subcategory="Dining",
+                value=400.0,
+                unit="INR",
+                occurred_at=today,
+                notes="expense",
+            )
+            # User A already soft-deleted entry
+            ea = Entry(
+                user_id=user_a,
+                category="income_expense",
+                subcategory="Groceries",
+                value=150.0,
+                unit="INR",
+                occurred_at=today,
+                notes="expense",
+                deleted_at=today,
+            )
+            db.add_all([eb, ea])
+            await db.commit()
+            await db.refresh(eb)
+            await db.refresh(ea)
+            user_b_entry_id = str(eb.id)
+            user_a_deleted_entry_id = str(ea.id)
+
+        ctx_a = ToolContext(user_id=user_a, client_date=today)
+
+        # User A tries to delete User B's entry
+        res_cross = await execute_propose_delete(
+            ProposeDeleteArgs(category="income_expense", entry_ids=[user_b_entry_id]),
+            ctx_a,
+        )
+        assert res_cross.data["status"] == "not_found"
+        assert res_cross.blocks[0].type == "notice"
+        assert res_cross.blocks[0].tone == "warn"
+
+        # User A tries to delete already soft-deleted entry
+        res_soft = await execute_propose_delete(
+            ProposeDeleteArgs(category="income_expense", entry_ids=[user_a_deleted_entry_id]),
+            ctx_a,
+        )
+        assert res_soft.data["status"] == "not_found"
+        assert res_soft.blocks[0].type == "notice"
+
+
+@pytest.mark.asyncio
+async def test_propose_delete_malformed_ids():
+    """Verify propose_delete returns invalid on malformed UUID strings."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        user_id = await register_user(client, "pd_badid")
+        today = date(2026, 10, 4)
+        ctx = ToolContext(user_id=user_id, client_date=today)
+
+        res = await execute_propose_delete(
+            ProposeDeleteArgs(category="study", entry_ids=["not-a-valid-uuid", "123"]),
+            ctx,
+        )
+        assert res.data["status"] == "invalid"
+        assert len(res.blocks) == 1
+        assert res.blocks[0].type == "notice"
+        assert "malformed" in res.blocks[0].text
+
 
 

@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
     # ── Gemini AI (Chunk 11) ─────────────────────────────────────
     GEMINI_API_KEY: str = ""        # empty = recommendations degrade to "unavailable"
-    GEMINI_MODEL: str = "gemini-3.6-flash"
+    GEMINI_MODEL: str = "gemini-3.5-flash"
 
     # ── AI Assistant (Phases 1-2) ────────────────────────────────
     ASSISTANT_MAX_TOOL_ROUNDS: int = 4

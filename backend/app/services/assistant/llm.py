@@ -150,6 +150,7 @@ class GeminiClient:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         timeout_seconds: Optional[int] = None,
+        fallback_models: Optional[List[str]] = None,
     ):
         self.api_key = api_key if api_key is not None else settings.GEMINI_API_KEY
         self.model = model or settings.GEMINI_MODEL
@@ -158,6 +159,7 @@ class GeminiClient:
             if timeout_seconds is not None
             else settings.ASSISTANT_LLM_TIMEOUT_S
         )
+        self.fallback_models = fallback_models or []
 
     async def generate(
         self,
@@ -230,47 +232,77 @@ class GeminiClient:
                 if parts:
                     contents.append(genai_types.Content(role="user", parts=parts))
 
-        # 4. Invoke model with timeout and retry for transient 503/UNAVAILABLE spikes
+        # 4. Invoke model with timeout, retry for transient spikes, and fallback for quota limits
         client = genai.Client(api_key=self.api_key)
         response = None
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                response = await asyncio.wait_for(
-                    client.aio.models.generate_content(
-                        model=self.model,
-                        contents=contents,
-                        config=config,
-                    ),
-                    timeout=self.timeout_seconds,
-                )
+        models_to_try = [self.model]
+        for fb in self.fallback_models:
+            if fb not in models_to_try:
+                models_to_try.append(fb)
+
+        last_quota_exc: Optional[Exception] = None
+        last_err_exc: Optional[Exception] = None
+        model_succeeded = False
+
+        for model_idx, active_model in enumerate(models_to_try):
+            max_attempts = 3 if model_idx == 0 else 1
+            for attempt in range(max_attempts):
+                try:
+                    response = await asyncio.wait_for(
+                        client.aio.models.generate_content(
+                            model=active_model,
+                            contents=contents,
+                            config=config,
+                        ),
+                        timeout=self.timeout_seconds,
+                    )
+                    model_succeeded = True
+                    break
+                except asyncio.TimeoutError as exc:
+                    if attempt == max_attempts - 1:
+                        last_err_exc = LLMTimeoutError(f"LLM request timed out after {self.timeout_seconds}s")
+                    await asyncio.sleep(1.0)
+                except Exception as exc:
+                    err_msg = str(exc)
+                    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                    is_quota = (
+                        code == 429
+                        or "429" in err_msg
+                        or "RESOURCE_EXHAUSTED" in err_msg
+                        or "quota" in err_msg.lower()
+                    )
+                    is_transient = (
+                        is_quota
+                        or code in (503, 500, 502, 504)
+                        or "503" in err_msg
+                        or "UNAVAILABLE" in err_msg
+                    )
+                    if is_transient and attempt < max_attempts - 1:
+                        logger.info("Retrying Gemini request after transient error (attempt %d): %s", attempt + 1, err_msg[:80])
+                        await asyncio.sleep(1.5 * (attempt + 1))
+                        continue
+                    if is_quota:
+                        last_quota_exc = LLMQuotaError(f"Gemini API quota exceeded for model {active_model}: {exc}")
+                        break
+                    last_err_exc = LLMError(f"Gemini API request failed for model {active_model}: {exc}")
+                    break
+
+            if model_succeeded and response:
                 break
-            except asyncio.TimeoutError as exc:
-                if attempt == max_attempts - 1:
-                    raise LLMTimeoutError(f"LLM request timed out after {self.timeout_seconds}s") from exc
-                await asyncio.sleep(1.0)
-            except Exception as exc:
-                err_msg = str(exc)
-                code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-                is_quota = (
-                    code == 429
-                    or "429" in err_msg
-                    or "RESOURCE_EXHAUSTED" in err_msg
-                    or "quota" in err_msg.lower()
+            if last_quota_exc and model_idx < len(models_to_try) - 1:
+                logger.warning(
+                    "Model %s exhausted quota; falling back to %s",
+                    active_model,
+                    models_to_try[model_idx + 1],
                 )
-                is_transient = (
-                    is_quota
-                    or code in (503, 500, 502, 504)
-                    or "503" in err_msg
-                    or "UNAVAILABLE" in err_msg
-                )
-                if is_transient and attempt < max_attempts - 1:
-                    logger.info("Retrying Gemini request after transient error (attempt %d): %s", attempt + 1, err_msg[:80])
-                    await asyncio.sleep(1.5 * (attempt + 1))
-                    continue
-                if is_quota:
-                    raise LLMQuotaError(f"Gemini API quota exceeded: {exc}") from exc
-                raise LLMError(f"Gemini API request failed: {exc}") from exc
+                continue
+
+        if not response or not model_succeeded:
+            if last_quota_exc:
+                raise last_quota_exc
+            if last_err_exc:
+                raise last_err_exc
+            raise LLMError("No response received from Gemini")
 
         # 5. Parse response candidates into LLMTurn
         if not response.candidates:
@@ -302,4 +334,4 @@ class GeminiClient:
 
 def get_llm_client() -> LLMClient:
     """FastAPI dependency to retrieve the LLMClient instance."""
-    return GeminiClient()
+    return GeminiClient(fallback_models=["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"])

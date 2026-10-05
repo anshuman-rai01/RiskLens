@@ -211,3 +211,34 @@ The frontend dev server runs at `http://localhost:3000`.
   - `dist/assets/index-BHYsMbwn.css`: 43.47 kB (gzip: 8.35 kB)
   - `dist/assets/index-DVdfoII6.js`: 696.15 kB (gzip: 194.25 kB)
   - Total bundle: 739.62 kB raw (202.6 kB gzipped).
+
+---
+
+## AI Assistant: Conversational Intelligence, Search & Safe Entry Management
+
+The RiskLens AI Assistant (`POST /assistant/chat`) is an autonomous personal intelligence companion accessible via the floating chat widget on the frontend. It allows users to query forecasts, summarize financial history, search entries across all categories, and safely propose creating or deleting records through natural conversation.
+
+### 1. Architecture & Zero-Writes Safety Principle
+
+To guarantee safety, auditability, and eliminate the risk of hallucinated or accidental database writes:
+- **Server Tools Never Write**: The `propose_entry` and `propose_delete` backend tools strictly validate inputs and construct structured confirmation cards (`ConfirmEntryBlock` and `ConfirmDeleteBlock`). They **never execute SQL INSERT, UPDATE, or DELETE statements**.
+- **User Confirmation Required**: The frontend renders the interactive confirmation card with clear action buttons ("Save Entry" / "Delete Entry" vs "Cancel"). The actual write operation is executed only when the user explicitly clicks the button, invoking existing frontend database methods (`createEntry` / `deleteEntry`) that trigger automatic cache updates and UI refreshes.
+- **One-Action Enforcement**: To prevent card spam or ambiguity, the backend agent (`agent.py`) intercepts duplicate or multiple `propose_*` calls in a single turn, allowing at most **one active write proposal per response**. Any subsequent write attempts in that turn return a typed `one_action_limit` error, guiding the model to offer one step at a time.
+- **Always Check Before Delete**: The system prompt mandates that the assistant must call `find_entries` to locate existing records and retrieve verified UUIDs before proposing deletions. The assistant is strictly prohibited from guessing or fabricating IDs.
+
+### 2. Available Assistant Tools
+
+| Tool | Type | Purpose | Output Block |
+|---|---|---|---|
+| `get_forecast` | Read / Compute | Deterministic Prophet predictive modeling for expenses, income, savings, or net finances | `ChartBlock`, `NoticeBlock` |
+| `build_report` | Read / Compute | Summarize past financial performance, totals, and top expense categories | `MetricsBlock`, `ChartBlock` |
+| `find_entries` | Read / Query | Search and filter active records across all 6 categories (`income_expense`, `savings`, `study`, `academic`, `fitness`, `habits`) by date range, keyword, or kind | `TableBlock`, `NoticeBlock` |
+| `propose_entry` | Write Proposal | Validates category fields, maps them to the frontend payload shape, and prepares a confirmation card | `ConfirmEntryBlock` |
+| `propose_delete` | Write Proposal | Validates that target entry IDs exist, belong to the authenticated user, match the category, and are not soft-deleted | `ConfirmDeleteBlock` |
+
+### 3. Error Handling, Rate Limiting & Gemini 3 Thought Signatures
+
+- **Quota & Rate Limit Differentiation (`LLMQuotaError`)**: When Gemini API limits or HTTP 429 `RESOURCE_EXHAUSTED` errors occur, the retry loop backs off exponentially. If exhausted, it raises `LLMQuotaError`, returning a friendly `"The assistant is busy right now. Please try again in a minute."` response rather than an ambiguous "temporarily unavailable" error.
+- **Gemini 3 Thought Signature Preservation**: In Gemini 3, function calls generate opaque thought signatures that the Google API mandates must be passed back verbatim in subsequent turns. The agent passes the raw model turn untouched (`LLMTurn.raw`), preventing HTTP 400 rejection on multi-turn function-calling loops.
+- **User Isolation & Soft Delete**: All queries and validations strictly filter on `user_id == current_user` and `deleted_at IS NULL`.
+

@@ -161,6 +161,7 @@ async def run_assistant_agent(
             history_messages.append(AssistantMessage(text=msg.text))
 
     collected_blocks: List[Block] = []
+    action_proposed: bool = False
 
     try:
         for round_idx in range(settings.ASSISTANT_MAX_TOOL_ROUNDS):
@@ -170,7 +171,7 @@ async def run_assistant_agent(
                 return AssistantChatResponse(
                     id=response_id,
                     text="I reached the time limit while processing your request. Here is what was gathered so far.",
-                    blocks=collected_blocks[:6],
+                    blocks=collected_blocks[:10],
                     outcome="degraded",
                 )
 
@@ -189,7 +190,7 @@ async def run_assistant_agent(
                 return AssistantChatResponse(
                     id=response_id,
                     text=reply_text,
-                    blocks=collected_blocks[:6],
+                    blocks=collected_blocks[:10],
                     outcome="ok",
                 )
 
@@ -209,9 +210,39 @@ async def run_assistant_agent(
                     index_by_signature[sig] = len(unique_calls)
                     unique_calls.append(tc)
 
+            # Enforce one-action rule: allow only the first propose_* call across the entire request
+            calls_to_execute: List[Tuple[ToolCall, bool]] = []
+            for tc in unique_calls:
+                if tc.name in ("propose_entry", "propose_delete"):
+                    if action_proposed:
+                        calls_to_execute.append((tc, True))
+                    else:
+                        action_proposed = True
+                        calls_to_execute.append((tc, False))
+                else:
+                    calls_to_execute.append((tc, False))
+
+            async def _intercept_action(tc: ToolCall) -> Tuple[ToolResult, List[Block]]:
+                logger.info("One-action rule intercepted extra action: name=%s", tc.name)
+                return (
+                    ToolResult(
+                        name=tc.name,
+                        call_id=tc.id or tc.name,
+                        data={
+                            "status": "error",
+                            "error": "one_action_limit",
+                            "message": "Only one create or delete action can be proposed per response. Propose the next action in a follow-up turn.",
+                        },
+                    ),
+                    [],
+                )
+
             # Concurrently execute all unique tool calls in this round
             results = await asyncio.gather(
-                *[_execute_single_tool(tc, context) for tc in unique_calls]
+                *[
+                    _intercept_action(tc) if is_intercepted else _execute_single_tool(tc, context)
+                    for tc, is_intercepted in calls_to_execute
+                ]
             )
             for _, blocks in results:  # blocks are collected once per executed call
                 collected_blocks.extend(blocks)

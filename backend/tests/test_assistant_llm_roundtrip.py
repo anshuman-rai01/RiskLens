@@ -205,3 +205,29 @@ async def test_gemini_client_raises_quota_error_on_429(monkeypatch):
 
     assert "quota exceeded" in str(exc_info.value).lower()
     assert attempts == 3
+
+
+def test_sanitize_schema_strips_additional_properties():
+    """Gemini API rejects schemas with 'additionalProperties'; verify they are stripped."""
+    schema = {
+        "type": "object",
+        "title": "ProposeEntryArgs",
+        "$defs": {"Sub": {"type": "string"}},
+        "properties": {
+            "category": {"type": "string", "title": "Category"},
+            "data": {
+                "type": "object",
+                "title": "Data",
+                "additionalProperties": True,
+                "additional_properties": True,
+            },
+        },
+    }
+    sanitized = llm_module.sanitize_schema_for_gemini(schema)
+    assert "$defs" not in sanitized
+    assert "title" not in sanitized
+    assert "title" not in sanitized["properties"]["category"]
+    assert "additionalProperties" not in sanitized["properties"]["data"]
+    assert "additional_properties" not in sanitized["properties"]["data"]
+    assert sanitized["properties"]["data"]["type"] == "object"
+

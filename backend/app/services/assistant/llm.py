@@ -114,7 +114,7 @@ def sanitize_schema_for_gemini(schema: Dict[str, Any]) -> Dict[str, Any]:
     """
     cleaned: Dict[str, Any] = {}
     for k, v in schema.items():
-        if k in ("$defs", "definitions", "title"):
+        if k in ("$defs", "definitions", "title", "additionalProperties", "additional_properties"):
             continue
         if k == "anyOf" and isinstance(v, list):
             # Flatten nullable anyOf: [{'type': 'string'}, {'type': 'null'}] -> {'type': 'string'}

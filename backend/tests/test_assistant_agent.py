@@ -29,6 +29,7 @@ from app.services.assistant.llm import (
     NeutralMessage,
     ToolCall,
     ToolDeclaration,
+    ToolResultMessage,
 )
 
 
@@ -298,3 +299,48 @@ async def test_agent_llm_quota_unavailable():
     assert res.outcome == "unavailable"
     assert res.text == "The assistant is busy right now. Please try again in a minute."
     assert len(res.blocks) == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_enforces_one_action_rule():
+    """When the LLM attempts multiple propose_* calls in one response, only the first is accepted."""
+    fake_llm = ScriptedFakeLLM([
+        LLMTurn(
+            tool_calls=[
+                ToolCall(
+                    name="propose_entry",
+                    args={"category": "income_expense", "data": {"kind": "expense", "amount": 100.0, "description": "Coffee"}},
+                ),
+                ToolCall(
+                    name="propose_entry",
+                    args={"category": "income_expense", "data": {"kind": "expense", "amount": 200.0, "description": "Tea"}},
+                ),
+            ]
+        ),
+        LLMTurn(text="I have prepared your coffee expense. You can log tea next."),
+    ])
+
+    req = AssistantChatRequest(
+        messages=[ChatMessage(role="user", text="Log coffee 100 and tea 200")]
+    )
+    res = await run_assistant_agent(
+        request=req,
+        user_id="00000000-0000-0000-0000-000000000011",
+        client_date=date(2026, 10, 4),
+        llm_client=fake_llm,
+    )
+
+    assert res.outcome == "ok"
+    # Exactly one confirmation block must be returned
+    assert len(res.blocks) == 1
+    assert res.blocks[0].type == "confirm_entry"
+    assert "Coffee" in res.blocks[0].summary
+
+    # Verify that the second call received the one_action_limit error result
+    second_turn_msgs = fake_llm.received_messages[1]
+    tool_results_msg = [m for m in second_turn_msgs if isinstance(m, ToolResultMessage)][0]
+    assert len(tool_results_msg.results) == 2
+    assert tool_results_msg.results[0].data["status"] == "ok"
+    assert tool_results_msg.results[1].data["status"] == "error"
+    assert tool_results_msg.results[1].data["error"] == "one_action_limit"
+

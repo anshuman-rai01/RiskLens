@@ -26,8 +26,8 @@ API_BASE_URL = os.getenv("API_URL", "http://localhost:8000")
 DEFAULT_EMAIL = os.getenv("SEED_EMAIL", "demo@risklens.app")
 DEFAULT_PASSWORD = os.getenv("SEED_PASSWORD", "Demo1234!")
 
-MONTHS_OF_HISTORY = 6
-DAYS_OF_HISTORY = MONTHS_OF_HISTORY * 30  # 180 days
+MONTHS_OF_HISTORY = 24
+DAYS_OF_HISTORY = MONTHS_OF_HISTORY * 30  # 720 days
 
 # Phases corresponding to timeline months
 PHASE_TIMELINE = ["Lecture", "Problem", "Flash card", "Lab", "Group", "Past year Papers"]
@@ -372,31 +372,38 @@ def generate_fitness_activities(token: str) -> None:
 # 5. HABIT TRACKING (Daily Completions)
 # ==========================================
 
+# ==========================================
+# 5. HABIT TRACKING (Daily Completions)
+# ==========================================
+
 def generate_habits(token: str) -> None:
     print("Seeding Habit Activities...")
     created = 0
     
-    # Iterate through every day in the 180-day window
+    # Iterate through every day in the history window
     for day_index in range(DAYS_OF_HISTORY):
         # Simulate completing between 2 and 5 habits on any given day
-        num_habits_today = random.randint(2, 5)
+        num_habits_today = random.randint(2, len(HABIT_SUBCATS) - 1)
         
         # Randomly select which habits were completed that day
         completed_habits_today = random.sample(HABIT_SUBCATS, num_habits_today)
         
-        for habit in completed_habits_today:
-            # Using value=1 and unit="COMPLETION" to signify the habit was done
+        # Iterate over EVERY habit to mark it as either completed (1) or missed (-1)
+        for habit in HABIT_SUBCATS:
+            # If the habit is in today's completed list, value is 1, else -1
+            habit_value = 1 if habit in completed_habits_today else -1
+            
             if create_entry(
                 token,
                 "habits",
                 habit,
-                1,
+                habit_value,
                 "COMPLETION",
                 day_to_date(day_index),
             ):
                 created += 1
 
-    print(f"  Habit entries: {created} (distributed across matching habits: {', '.join(HABIT_SUBCATS)})")
+    print(f"  Habit entries: {created} (completed and missed tracked across: {', '.join(HABIT_SUBCATS)})")
 
 
 # ==========================================

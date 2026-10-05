@@ -46,7 +46,7 @@ function subscribeToasts(fn: () => void): () => void {
 export function ToastHost() {
   const list = useSyncExternalStore(subscribeToasts, () => toastList);
   return (
-    <div className="fixed bottom-5 right-5 z-[80] flex flex-col gap-2 items-end">
+    <div className="fixed bottom-24 right-5 z-[80] flex flex-col gap-2 items-end">
       {list.map((t) => (
         <div
           key={t.id}

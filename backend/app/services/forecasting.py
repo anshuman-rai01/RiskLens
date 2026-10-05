@@ -34,6 +34,8 @@ def compute_forecast(
     min_points_low: int = 14,
     min_points_reliable: int = 28,
     include_history: bool = False,
+    zero_fill: bool = False,
+    as_of: Optional[date] = None,
 ) -> Dict[str, Any]:
     """
     Given a list of historical Entry records for a series:
@@ -45,6 +47,14 @@ def compute_forecast(
     3. Fits Prophet and predicts `horizon_days` steps into the future.
     4. Handles degenerate series or fitting errors gracefully without raising 500s.
 
+    When `zero_fill` is True and `freq == "D"`:
+        Missing days between the first entry date and max(last_entry_date, as_of)
+        are reindexed and filled with 0.0.
+        Assumption: days without a logged entry are treated as zero.
+        `n_points` (used for reliability tiering and data_point_count) reflects
+        only days with actual logged entries, preventing synthetic zeros from
+        inflating reliability.
+
     Parameters:
         entries: Historical Entry records
         horizon_days: Number of periods to forecast (days if freq="D", months if freq="MS")
@@ -53,6 +63,9 @@ def compute_forecast(
         min_points_low: Minimum aggregated points for low_confidence tier
         min_points_reliable: Minimum aggregated points for reliable tier
         include_history: If True, include historical fitted values in output
+        zero_fill: If True (and freq="D"), fill missing calendar days with 0
+        as_of: Reference date to anchor the horizon. If provided and after the last
+               entry, missing days up to as_of are zero-filled so forecast starts tomorrow.
     """
     if not entries:
         return {
@@ -112,21 +125,39 @@ def compute_forecast(
     # ── Tier 2 & 3: Low Confidence or Reliable ───────────────────
     reliability = "low_confidence" if n_points < min_points_reliable else "reliable"
 
+    # ── Zero-fill handling (when enabled for daily frequency) ────
+    if zero_fill and freq == "D":
+        first_date = df_agg["ds"].min()
+        last_entry_date = df_agg["ds"].max()
+        if as_of is not None:
+            as_of_dt = pd.to_datetime(as_of)
+            end_date = max(last_entry_date, as_of_dt)
+        else:
+            end_date = last_entry_date
+        full_index = pd.date_range(start=first_date, end=end_date, freq="D", name="ds")
+        fit_df = (
+            df_agg.set_index("ds")
+            .reindex(full_index, fill_value=0.0)
+            .reset_index()
+        )
+    else:
+        fit_df = df_agg
+
     try:
         # Check for constant/degenerate values
-        is_constant = df_agg["y"].nunique() <= 1
+        is_constant = fit_df["y"].nunique() <= 1
 
         # Configure seasonality based on frequency and data volume
         if freq == "D":
-            weekly_seasonality = n_points >= 14
+            weekly_seasonality = len(fit_df) >= 14
             yearly_seasonality = False
             daily_seasonality = False
         elif freq == "MS":
             weekly_seasonality = False
-            yearly_seasonality = n_points >= 24
+            yearly_seasonality = len(fit_df) >= 24
             daily_seasonality = False
         else:
-            weekly_seasonality = n_points >= 4
+            weekly_seasonality = len(fit_df) >= 4
             yearly_seasonality = False
             daily_seasonality = False
 
@@ -138,7 +169,7 @@ def compute_forecast(
             weekly_seasonality=weekly_seasonality,
             yearly_seasonality=yearly_seasonality,
         )
-        model.fit(df_agg)
+        model.fit(fit_df)
 
         # Make future dataframe strictly for future horizon
         future = model.make_future_dataframe(
@@ -148,7 +179,7 @@ def compute_forecast(
         )
         if not include_history:
             # Ensure we only get future points
-            last_date = df_agg["ds"].max()
+            last_date = fit_df["ds"].max()
             future = future[future["ds"] > last_date]
 
         forecast = model.predict(future)
@@ -191,8 +222,12 @@ def compute_forecast(
     except Exception as exc:
         logger.warning("Prophet fitting failed for series: %s", exc, exc_info=True)
         # Fallback projection without raising 500
-        last_y = float(df_agg["y"].iloc[-1])
-        last_date = pd.to_datetime(df_agg["ds"].iloc[-1])
+        if zero_fill and freq == "D":
+            last_y = float(fit_df["y"].mean())
+            last_date = pd.to_datetime(fit_df["ds"].iloc[-1])
+        else:
+            last_y = float(df_agg["y"].iloc[-1])
+            last_date = pd.to_datetime(df_agg["ds"].iloc[-1])
 
         if freq == "D":
             delta_fn = lambda i: pd.Timedelta(days=i)

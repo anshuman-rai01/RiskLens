@@ -11,6 +11,7 @@ import { ToastHost } from "./components/ui";
 import { AuthProvider, useAuth } from "./state/AuthContext";
 import { ThemeProvider, useTheme } from "./state/ThemeContext";
 import { AuthGate } from "./components/AuthGate";
+import { ChatWidget } from "./components/assistant/ChatWidget";
 
 function BootScreen() {
   return (
@@ -209,6 +210,9 @@ function Gate() {
           )}
         </main>
       </div>
+
+      {/* AI Assistant */}
+      <ChatWidget />
     </div>
   );
 }

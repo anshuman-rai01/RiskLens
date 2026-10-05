@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine
-from app.routers import alerts, auth, entries, forecasts, goals, health, profile, simulations
+from app.routers import alerts, assistant, auth, entries, forecasts, goals, health, profile, simulations
 
 
 # ── Lifespan ─────────────────────────────────────────────────────
@@ -56,3 +56,4 @@ app.include_router(forecasts.router)
 app.include_router(alerts.router)
 app.include_router(profile.router)
 app.include_router(simulations.router)
+app.include_router(assistant.router)
